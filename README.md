@@ -50,6 +50,12 @@ bash scripts/test.sh
 
 本版纯小狗源码通过 109 项测试。打包和自己的本地开发签名方式见[构建说明](docs/BUILDING.md)，官方发布签名的私钥不包含在源码中
 
+## 建议与反馈
+
+哪里让你觉得可爱，哪里有点打扰，或者希望小狗学会什么？欢迎[给我发邮件](mailto:zichen904@gmail.com?subject=DesktopPet%20%E5%B0%8F%E7%8B%97%E5%BB%BA%E8%AE%AE)：[zichen904@gmail.com](mailto:zichen904@gmail.com)
+
+也可以到[官网写点建议](https://desktop-pet-dog.pages.dev/#contact)，填写后打开自己的邮件应用并确认发送。反馈问题时，可以附上系统版本、小狗 build 号和复现步骤；请避免发送输入内容等私人信息
+
 ## 仓库与许可
 
 本仓库由维护者管理，外部账号没有直接推送修改的权限。公开仓库允许查看、下载和 Fork，Fork 是其他账号自己的副本，不会自动改变本仓库
