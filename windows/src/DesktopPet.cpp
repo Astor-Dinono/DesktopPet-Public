@@ -22,6 +22,7 @@
 #include "RotationFocus.hpp"
 #include "HeldKeys.hpp"
 #include "StrokeGesture.hpp"
+#include "HoverStrokeGesture.hpp"
 #include "PetExpression.hpp"
 #include "SqueezeEyes.hpp"
 #include "OperationHint.hpp"
@@ -63,7 +64,7 @@ struct Surface {
 };
 struct Settings {
     dog::TailSize tailSize=dog::TailSize::Small;
-    std::wstring folder,file;dog::Counts counts;double size=.62;int orientation=0,nap=180;unsigned effectsMask=1;bool always=false,hasPosition=false,positionLocked=true,operationHints=true;dog::Point center;
+    std::wstring folder,file;dog::Counts counts;double size=.62;int orientation=0,nap=180;unsigned effectsMask=1;bool always=false,hasPosition=false,positionLocked=false,operationHints=true;dog::Point center;
     bool init(){
         PWSTR base=nullptr;if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,KF_FLAG_CREATE,nullptr,&base)))return false;
         folder=std::wstring(base)+L"\\DesktopPet";CoTaskMemFree(base);
@@ -78,7 +79,7 @@ struct Settings {
         always=integer(L"AlwaysShow",0)==1;hasPosition=integer(L"HasPosition",0)==1;
         effectsMask=unsigned(integer(L"InteractionEffects",1))&15;
         tailSize=dog::storedTailSize(integer(L"TailSize",80));
-        positionLocked=integer(L"PositionLocked",1)==1;
+        positionLocked=integer(L"PositionLocked",0)==1;
         operationHints=integer(L"OperationHints",1)==1;
         center={std::wcstod(read(L"CenterX",L"0").c_str(),nullptr),std::wcstod(read(L"CenterY",L"0").c_str(),nullptr)};
         if(!std::isfinite(center.x)||!std::isfinite(center.y)||std::abs(center.x)>100000||std::abs(center.y)>100000)hasPosition=false;
@@ -100,7 +101,7 @@ struct App {
     HINSTANCE instance;HWND window=nullptr,effects=nullptr;HANDLE timer=nullptr;HPOWERNOTIFY displayNotification=nullptr;UINT taskbarCreated=0;bool trayAdded=false,displayOff=false,saveWarningShown=false,fxShown=false;
     Settings settings;Surface surface,fx;dog::Tail tail;dog::Duang duang;dog::Rest rest;dog::Blush blush;dog::Hearts hearts;dog::Turn turn;dog::Updater updater;
     dog::ContextMenu contextMenu;dog::HeldKeys heldKeys;
-    dog::StrokeGesture stroke;dog::PetExpression petExpression;
+    dog::StrokeGesture stroke;dog::HoverStrokeGesture hoverStroke;dog::PetExpression petExpression;
     dog::OperationHint operationHint;dog::OperationHintState hintState;
     GraphicsPath petHitPath{FillModeWinding},petHitClip;bool petHitReady=false,pressIsStroke=false,pressOnPet=false;
     double lastStrokeEffect=-100,lastStrokeDuang=-100;
@@ -137,7 +138,7 @@ struct App {
         double t=now();lastActivity=t;
         if(running()&&!dragging){rest.setSleep(false,t);if(wag)tail.wag(t);requestFrame();}
     }
-    void setNap(bool sleeping){double t=now();rest.setSleep(sleeping,t);if(sleeping){operationHint.hide();tail.settle(t);petExpression.clear();hearts.items.clear();}else lastActivity=t;requestFrame();}
+    void setNap(bool sleeping){double t=now();rest.setSleep(sleeping,t);if(sleeping){hoverStroke.cancel();operationHint.hide();tail.settle(t);petExpression.clear();hearts.items.clear();}else lastActivity=t;requestFrame();}
     void updateOperationHint(dog::Bounds petBounds,dog::Bounds badgeBounds){
         if(!hintState.available(running(),rest.sleeping,menuOpen,pressed,turning)){operationHint.hide();return;}
         auto placement=dog::operationHintPlacement(petBounds,badgeBounds,work(),dpi,operationHint.currentPlacement());
@@ -156,26 +157,42 @@ struct App {
         requestFrame();
     }
     bool hitsPet(dog::Point screenPoint){
-        if(!settings.positionLocked||!petHitReady)return false;
+        if(!petHitReady)return false;
         PointF p(REAL(screenPoint.x-windowRect.left),REAL(screenPoint.y-windowRect.top));
         if(!petHitClip.IsVisible(p))return false;
         Pen outline(Color(255,0,0,0),REAL(10.37*unit()));
         outline.SetLineJoin(LineJoinRound);outline.SetStartCap(LineCapRound);outline.SetEndCap(LineCapRound);
         return petHitPath.IsVisible(p)||petHitPath.IsOutlineVisible(p,&outline);
     }
+    static bool pointerButtonsDown(){
+        for(int key:{VK_LBUTTON,VK_RBUTTON,VK_MBUTTON,VK_XBUTTON1,VK_XBUTTON2})
+            if(GetAsyncKeyState(key)&0x8000)return true;
+        return false;
+    }
+    bool hoverBlocked(bool buttonsDown)const{
+        return buttonsDown||pressed||dragging||menuOpen||turning||!running();
+    }
+    void moveHover(dog::Point p,double t,bool buttonsDown){
+        if(hoverStroke.move(p*(1/dpi),t,hitsPet(p),hoverBlocked(buttonsDown)))strokePet(p,t);
+    }
+    void validateHover(dog::Point p,double t,bool buttonsDown,bool overWindow){
+        // Existing frames only validate/arm the dwell. They never accumulate
+        // movement, trigger feedback, or treat breathing as cursor movement.
+        hoverStroke.validate(p*(1/dpi),t,overWindow&&hitsPet(p),hoverBlocked(buttonsDown));
+    }
     dog::Point pointerPoint(LPARAM l){POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)};ClientToScreen(window,&p);return {double(p.x),double(p.y)};}
     void resumePointerTurn(){
         if(resumeTurn){turn.begin({center,{},angle,0},resumeAngle,now(),unit(),work());turning=true;resumeTurn=false;requestFrame();}
     }
     void cancelPointer(){
-        bool wasDragging=dragging;pressed=dragging=pressIsStroke=pressOnPet=false;stroke.cancel();
+        bool wasDragging=dragging;pressed=dragging=pressIsStroke=pressOnPet=false;stroke.cancel();hoverStroke.cancel();
         if(GetCapture()==window)ReleaseCapture();
         if(wasDragging)fit();resumePointerTurn();
     }
-    void beginPointer(dog::Point p,double t,bool doubleClick=false){
+    void beginPointer(dog::Point p,double t){
         if(!running()||menuOpen)return;
         operationHint.hide();
-        cancelPointer();selectForRotation();pressed=true;pressIsStroke=settings.positionLocked&&!doubleClick;pressOnPet=hitsPet(p);dragging=false;
+        cancelPointer();selectForRotation();pressed=true;pressIsStroke=settings.positionLocked;pressOnPet=hitsPet(p);dragging=false;
         resumeTurn=turning;if(turning){auto pose=turn.pose(t);center=pose.center;angle=pose.angle;resumeAngle=turn.target;turning=false;}
         pressPoint={LONG(std::lround(p.x)),LONG(std::lround(p.y))};pressCenter=center;
         if(pressIsStroke)stroke.begin(p*(1/dpi),t,hitsPet(p));
@@ -298,10 +315,10 @@ struct App {
         const bool wantsHint=hintState.available(running(),rest.sleeping,menuOpen,pressed,turning);
         dog::Bounds hintPetBounds{},hintBadgeBounds{};
         petHitReady=false;
-        if(settings.positionLocked||wantsHint){petHitPath.Reset();petHitPath.SetFillMode(FillModeWinding);petHitClip.Reset();petHitClip.AddPath(&clip,FALSE);}
+        petHitPath.Reset();petHitPath.SetFillMode(FillModeWinding);petHitClip.Reset();petHitClip.AddPath(&clip,FALSE);
         auto tailPose=tail.pose(t,reduced);auto tailTransform=[&](dog::Point p){return project(dog::bendTail(p,tailPose,settings.tailSize));};
         Color ink(255,0,0,0),white(255,255,255,255);
-        GraphicsPath* hit=settings.positionLocked||wantsHint?&petHitPath:nullptr;
+        GraphicsPath* hit=&petHitPath;
         path(g,tailShape,tailTransform,ink,10.37*unit(),white,nullptr,hit);path(g,head,headTransform,ink,10.37*unit(),white,nullptr,hit);
         if(wantsHint){
             RectF shapeBounds,clipBounds;Pen outline(ink,REAL(10.37*unit()));outline.SetLineJoin(LineJoinRound);
@@ -335,7 +352,7 @@ struct App {
             FontFamily family(L"Segoe UI");Font font(&family,REAL(10*dpi),FontStyleRegular,UnitPixel);StringFormat format;format.SetAlignment(StringAlignmentCenter);format.SetLineAlignment(StringAlignmentCenter);SolidBrush color(Color(alpha(countAlpha*.7),65,65,65));g.DrawString(value.c_str(),-1,&font,RectF(REAL(x),REAL(y),REAL(w),REAL(h)),&format,&color);
         }
         if(!surface.present(window,left,top))return false;
-        petHitReady=settings.positionLocked;
+        petHitReady=true;
         updateOperationHint(hintPetBounds,hintBadgeBounds);
         bool needsEffects=restPose.letters>.001||!hearts.items.empty();
         if(needsEffects){
@@ -367,6 +384,11 @@ struct App {
         if(!draw(t)){if(++frameFailures>=3){show(false);MessageBoxW(nullptr,L"小狗暂时无法绘制，请从托盘重新显示，或退出后再试。",L"小狗桌宠",MB_OK|MB_ICONWARNING);return;}}else{
             frameFailures=0;
             if(!readySent){HANDLE ready=OpenEventW(EVENT_MODIFY_STATE,FALSE,L"Local\\DesktopPet.Windows.Ready");if(ready){SetEvent(ready);CloseHandle(ready);}readySent=true;}
+        }
+        if(hoverStroke.active()){
+            POINT p{};
+            if(!GetCursorPos(&p))hoverStroke.cancel();
+            else validateHover({double(p.x),double(p.y)},t,pointerButtonsDown(),WindowFromPoint(p)==window);
         }
         nextFrame=t+(fast(t)?1.0/60:1.0/30);schedule();
     }
@@ -427,22 +449,27 @@ struct App {
         case WM_INPUT:rawInput(reinterpret_cast<HRAWINPUT>(l));return DefWindowProcW(window,m,w,l);
         case WM_MOUSEACTIVATE:if(HIWORD(l)==WM_LBUTTONDOWN||HIWORD(l)==WM_LBUTTONDBLCLK){dog::passiveWindow(window,false);return MA_ACTIVATE;}return MA_NOACTIVATE;
         case WM_LBUTTONDOWN:beginPointer(pointerPoint(l),now());return 0;
-        case WM_LBUTTONDBLCLK:beginPointer(pointerPoint(l),now(),true);return 0;
+        case WM_LBUTTONDBLCLK:beginPointer(pointerPoint(l),now());return 0;
         case WM_MOUSEMOVE:{
             if(!hover){hover=true;TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,window,0};TrackMouseEvent(&track);requestFrame();}
-            movePointer(pointerPoint(l),now());
+            const auto point=pointerPoint(l);const double t=now();
+            const bool buttons=(w&(MK_LBUTTON|MK_RBUTTON|MK_MBUTTON|MK_XBUTTON1|MK_XBUTTON2))||pointerButtonsDown();
+            if(pressed){hoverStroke.cancel();movePointer(point,t);}
+            else moveHover(point,t,buttons);
             return 0;}
-        case WM_MOUSELEAVE:hover=false;requestFrame();return 0;
+        case WM_MOUSELEAVE:hover=false;hoverStroke.cancel();requestFrame();return 0;
         case WM_LBUTTONUP:endPointer(pointerPoint(l));return 0;
-        case WM_CAPTURECHANGED:if(pressed)cancelPointer();return 0;
+        case WM_CAPTURECHANGED:hoverStroke.cancel();if(pressed)cancelPointer();return 0;
         case WM_CANCELMODE:cancelPointer();return 0;
+        case WM_RBUTTONDOWN:case WM_RBUTTONDBLCLK:case WM_MBUTTONDOWN:case WM_MBUTTONDBLCLK:
+        case WM_XBUTTONDOWN:case WM_XBUTTONDBLCLK:hoverStroke.cancel();break;
         case WM_CONTEXTMENU:{POINT p{GET_X_LPARAM(l),GET_Y_LPARAM(l)};if(p.x==-1)GetCursorPos(&p);menu(p);return 0;}
         case WM_KEYDOWN:if(selected&&GetFocus()==window&&!menuOpen){if(w=='R'&&!(l&(1LL<<30)))rotate();if(w==VK_ESCAPE){clearSelection();SetFocus(nullptr);}}return 0;
         case WM_KILLFOCUS:cancelPointer();clearSelection();return 0;
         case WM_ACTIVATE:if(LOWORD(w)==WA_INACTIVE){cancelPointer();clearSelection();}return 0;
         case WM_DPICHANGED:{cancelPointer();petHitReady=false;dpi=double(HIWORD(w))/96;turning=false;angle=settings.orientation*dog::pi/2;fit();return 0;}
         case WM_DISPLAYCHANGE:cancelPointer();petHitReady=false;turning=false;angle=settings.orientation*dog::pi/2;fit();return 0;
-        case WM_SETTINGCHANGE:updateReduced();fit();return 0;
+        case WM_SETTINGCHANGE:hoverStroke.cancel();updateReduced();fit();return 0;
         case WM_POWERBROADCAST:
             if(w==PBT_APMSUSPEND){suspended=true;pauseChanged();}
             else if(w==PBT_APMRESUMEAUTOMATIC||w==PBT_APMRESUMESUSPEND){suspended=false;pauseChanged();}

@@ -111,8 +111,8 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
     func setPositionLocked(_ locked: Bool) {
         stage.dogs.forEach { $0.positionLocked = locked }
         subtitle.stringValue = locked
-            ? "按住来回摸摸 · 双击按住第二下拖动 · 松手恢复摸摸"
-            : "拖动到边缘自动贴合 · 点击选中后按 R 旋转 · 点击空白取消选择"
+            ? "位置已锁定 · 光标停留后轻轻晃动摸摸 · 右键桌面小狗可解锁"
+            : "光标停留后轻轻晃动摸摸 · 按住拖动 · 点击选中后按 R 旋转"
     }
     func keyboardPress() {
         guard window?.isVisible == true, window?.isMiniaturized == false else { return }
@@ -233,16 +233,39 @@ final class DogPreviewCanvas: NSView {
         pet.onPositionChanged = { [weak self] in self?.snapToEdges() }
         pet.onPointerRelease = { [weak self] in self?.dragOrigin = nil }
         pet.onInteractionFrame = { [weak self] in
-            guard let self, self.turn != nil else { return }
-            self.advanceAnimation(at: self.clock())
+            guard let self else { return }
+            if self.turn != nil { self.advanceAnimation(at: self.clock()) }
+            self.refreshHover()
         }
-        pet.setAccessibilityHelp("拖动可在本区域内移动，松手靠近边缘会贴合并保持朝向。点击选中后按 R 平滑旋转，点击空白取消选择。")
+        pet.setAccessibilityHelp("光标停留片刻后轻轻来回移动即可摸摸。按住拖动可在本区域内移动，松手靠近边缘贴合。点击选中后按 R 旋转。")
         pose.center = placement.center(NSPoint(x: bounds.midX, y: bounds.minY), angle: 0)
         updateLabel()
         presentPose()
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    private func refreshHover() {
+        guard let window, window.isVisible, !window.isMiniaturized,
+              window.isKeyWindow, NSApp.isActive, turn == nil else {
+            pet.cancelHoverInteraction()
+            return
+        }
+        let screenPoint = NSEvent.mouseLocation
+        let point = pet.convert(window.convertPoint(fromScreen: screenPoint), from: nil)
+        guard pet.bounds.contains(point) else { pet.cancelHoverInteraction(); return }
+        // Ask only which window would receive this point; never enumerate
+        // applications/windows or collect any of their contents.
+        let hitsWindow = NSWindow.windowNumber(at: screenPoint, belowWindowWithWindowNumber: 0) == window.windowNumber
+        updateHover(at: point, pressedButtons: NSEvent.pressedMouseButtons,
+            windowEligible: true, pointerHitsWindow: hitsWindow)
+    }
+
+    // Separate eligibility from system sampling for deterministic regression.
+    func updateHover(at point: NSPoint, pressedButtons: Int, windowEligible: Bool, pointerHitsWindow: Bool) {
+        guard windowEligible, pointerHitsWindow, turn == nil else { pet.cancelHoverInteraction(); return }
+        pet.updateHover(at: point, pressedButtons: pressedButtons, hoverTime: clock())
+    }
 
     override func becomeFirstResponder() -> Bool {
         selected = true

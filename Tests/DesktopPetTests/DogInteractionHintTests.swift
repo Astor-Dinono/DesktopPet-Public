@@ -127,9 +127,9 @@ final class DogInteractionHintTests: XCTestCase, @unchecked Sendable {
             _ = NSApplication.shared
             let view = DogInteractionHintContentView(frame: NSRect(origin: .zero, size: DogInteractionHintLayout.size))
             let label = try XCTUnwrap(view.subviews.compactMap { $0 as? NSTextField }.first)
-            XCTAssertEqual(label.stringValue, "双击按住拖动我\n按住来回摸摸我")
+            XCTAssertEqual(label.stringValue, "右键解锁后可拖动\n来回晃晃摸摸我")
             view.setPositionLocked(false)
-            XCTAssertEqual(label.stringValue, "按住拖动我\n点一下摸摸我")
+            XCTAssertEqual(label.stringValue, "按住拖动我\n来回晃晃摸摸我")
             XCTAssertEqual(view.closeButton.title, "关闭")
             XCTAssertEqual(view.disableButton.title, "不再提示")
             XCTAssertEqual(view.closeButton.accessibilityRole(), .button)

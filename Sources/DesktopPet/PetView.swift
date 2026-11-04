@@ -85,9 +85,11 @@ final class PetPanel: NSPanel {
     }
 
     // Kept separate from cursor sampling so geometry, capture and foreign drags can be verified.
-    func updatePointerRouting(at point: NSPoint, pressedButtons: Int) {
+    func updatePointerRouting(at point: NSPoint, pressedButtons: Int, hoverTime: TimeInterval? = nil) {
         guard let companion = contentView as? DogCompanionView else { return }
         companion.updatePointer(at: point)
+        companion.pet.updateHover(at: companion.pet.convert(point, from: companion),
+            pressedButtons: pressedButtons, hoverTime: hoverTime)
         ignoresMouseEvents = !companion.pet.hasPointerCapture
             && (pressedButtons != 0 || !companion.containsInteraction(point))
     }
@@ -103,9 +105,12 @@ enum DogRotationKey {
 
 @MainActor
 final class PetView: NSView {
-    var orientation: DogOrientation = .bottom { didSet { needsDisplay = true } }
+    var orientation: DogOrientation = .bottom {
+        didSet { if oldValue != orientation { cancelHoverInteraction() }; needsDisplay = true }
+    }
     var topbarHeight: CGFloat? {
         didSet {
+            if oldValue != topbarHeight { cancelHoverInteraction() }
             needsDisplay = true
             if topbarHeight != nil {
                 setAccessibilityLabel("顶栏小狗，左右拖动摆放，向下拖出")
@@ -120,7 +125,7 @@ final class PetView: NSView {
     var topbarScale: Double = 0.5 { didSet { needsDisplay = true } }
     var tailSize: DogTailSize = .small { didSet { needsDisplay = true } }
     static let positionLockKey = "dog.positionLocked"
-    var positionLocked = true {
+    var positionLocked = false {
         didSet {
             if oldValue != positionLocked { cancelPointerInteraction() }
             updateInteractionHelp()
@@ -149,6 +154,9 @@ final class PetView: NSView {
     private(set) var turnPresentation: DogTurnPresentation?
     var hasPointerCapture: Bool { pressPoint != nil }
     var allowsWindowDragging = true
+    var allowsHoverInteraction = true {
+        didSet { if !allowsHoverInteraction { cancelHoverInteraction() } }
+    }
     private var tail = DogMotion()
     private var running = false
     private var timer: Timer?
@@ -159,6 +167,7 @@ final class PetView: NSView {
     private var pressIsStroke = false
     private var pressCanClick = false
     private var stroke = DogStrokeGesture()
+    private var hover = DogHoverGesture()
     private var petExpression = DogPetExpression()
     private var lastStrokeEffect: TimeInterval = -.infinity
     private var lastStrokeBounce: TimeInterval = -.infinity
@@ -232,6 +241,7 @@ final class PetView: NSView {
     }
 
     func setTurnPresentation(_ presentation: DogTurnPresentation?) {
+        if presentation != nil { cancelHoverInteraction() }
         turnPresentation = presentation
         needsDisplay = true
         if presentation != nil { schedule(interval: reducedMotion ? 1 / 10 : 1 / 60) }
@@ -361,19 +371,37 @@ final class PetView: NSView {
 
     func updateInteractionHelp() {
         if positionLocked {
-            setAccessibilityHelp("按住小狗来回摸摸；快速双击并按住第二下可拖动，松手自动恢复摸摸。")
+            setAccessibilityHelp("位置已锁定。光标停留片刻后轻轻来回移动即可摸摸，也可按住来回摸摸；右键可解锁位置。")
         } else if topbarHeight != nil {
-            setAccessibilityHelp("左右拖动调整顶栏位置，向下拖出回到桌面；右键可以调整大小或重置位置。")
+            setAccessibilityHelp("光标停留片刻后轻轻来回移动即可摸摸；按住左右拖动调整顶栏位置，向下拖出回到桌面。")
         } else {
-            setAccessibilityHelp("点击摸摸并选中，按 R 平滑旋转 90°；拖动可以移动。右键可锁定位置后按住来回摸摸。")
+            setAccessibilityHelp("光标停留片刻后轻轻来回移动即可摸摸；按住拖动可以移动。点击选中后按 R 旋转；右键可锁定位置。")
         }
     }
 
+    /// Called by existing pointer routing, including its regular animation-frame
+    /// refresh. Screen points stay stable while breathing changes the silhouette.
+    func updateHover(at point: NSPoint, pressedButtons: Int, hoverTime: TimeInterval? = nil) {
+        guard let window else { cancelHoverInteraction(); return }
+        let allowed = allowsHoverInteraction && !hasPointerCapture && !motion.isDragging
+            && turnPresentation == nil && pressedButtons == 0
+        guard allowed else { cancelHoverInteraction(); return }
+        let screenPoint = window.convertPoint(toScreen: convert(point, to: nil))
+        if hover.update(screenPoint, now: hoverTime ?? now,
+            inside: containsInteraction(point, includesBaseline: false), allowed: true) {
+            strokePet(at: screenPoint, now: now)
+        }
+    }
+
+    func cancelHoverInteraction() { hover.cancel() }
+
     func cancelStroke() {
+        cancelHoverInteraction()
         if pressIsStroke { cancelPointerInteraction() }
     }
 
     func cancelPointerInteraction() {
+        cancelHoverInteraction()
         let captured = hasPointerCapture
         let wasDragging = didDrag
         pressPoint = nil
@@ -400,6 +428,7 @@ final class PetView: NSView {
     }
 
     func pointerClick() {
+        cancelHoverInteraction()
         inputActivity(wagsTail: false)
     }
 
@@ -445,9 +474,8 @@ final class PetView: NSView {
         pressPoint = window.convertPoint(toScreen: event.locationInWindow)
         originalWindowOrigin = window.frame.origin
         didDrag = false
-        // AppKit supplies the user's system double-click timing. The override
-        // belongs only to this press; it never changes the saved lock setting.
-        pressIsStroke = positionLocked && event.clickCount < 2
+        // Single press always drags unless the user explicitly locked position.
+        pressIsStroke = positionLocked
         pressCanClick = !positionLocked
             || containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false)
         if pressIsStroke, let pressPoint {

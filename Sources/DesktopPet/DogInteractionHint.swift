@@ -210,7 +210,7 @@ final class DogInteractionHintContentView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     func setPositionLocked(_ locked: Bool) {
-        label.stringValue = locked ? "双击按住拖动我\n按住来回摸摸我" : "按住拖动我\n点一下摸摸我"
+        label.stringValue = locked ? "右键解锁后可拖动\n来回晃晃摸摸我" : "按住拖动我\n来回晃晃摸摸我"
     }
 
     override func draw(_ dirtyRect: NSRect) {

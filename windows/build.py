@@ -17,7 +17,7 @@ import base64
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0-b10'
+VERSION = '0.1.0-b11'
 
 def main():
     parser = argparse.ArgumentParser()

@@ -4,6 +4,61 @@ import XCTest
 @testable import DesktopPet
 
 final class StrokeGestureTests: XCTestCase {
+    func testHoverDwellAllowsGentleMovementButDiscardsEarlyTravel() {
+        var hover = DogHoverGesture()
+        XCTAssertFalse(hover.update(.zero, now: 0, inside: true, allowed: true))
+        XCTAssertFalse(hover.update(CGPoint(x: 30, y: 0), now: 0.2, inside: true, allowed: true))
+        XCTAssertFalse(hover.isArmed)
+        XCTAssertFalse(hover.update(.zero, now: 0.35, inside: true, allowed: true))
+        XCTAssertTrue(hover.isArmed)
+        XCTAssertFalse(hover.update(CGPoint(x: 6, y: 0), now: 0.36, inside: true, allowed: true))
+        XCTAssertTrue(hover.update(.zero, now: 0.37, inside: true, allowed: true))
+        XCTAssertFalse(hover.update(.zero, now: 10, inside: true, allowed: true))
+    }
+
+    func testHoverPassingLeavingOrBlockedButtonsResetIntent() {
+        for blockByLeaving in [false, true] {
+            var hover = DogHoverGesture()
+            XCTAssertFalse(hover.update(.zero, now: 0, inside: true, allowed: true))
+            XCTAssertFalse(hover.update(CGPoint(x: 50, y: 0), now: 0.2, inside: true, allowed: true))
+            XCTAssertFalse(hover.update(.zero, now: 0.3, inside: !blockByLeaving, allowed: blockByLeaving))
+            XCTAssertFalse(hover.isArmed)
+            XCTAssertFalse(hover.update(CGPoint(x: 20, y: 0), now: 1, inside: true, allowed: true))
+            XCTAssertFalse(hover.update(.zero, now: 1.2, inside: true, allowed: true))
+            XCTAssertFalse(hover.update(.zero, now: 1.36, inside: true, allowed: true))
+            XCTAssertTrue(hover.update(CGPoint(x: 10, y: 0), now: 1.4, inside: true, allowed: true))
+        }
+    }
+
+    func testStationaryHoverAndTinyJitterNeverPet() {
+        var hover = DogHoverGesture()
+        for index in 0...10_000 {
+            XCTAssertFalse(hover.update(CGPoint(x: index % 2 == 0 ? -1 : 1, y: 0),
+                now: Double(index) * 0.01, inside: true, allowed: true))
+        }
+        XCTAssertTrue(hover.isArmed)
+        hover.cancel()
+        XCTAssertFalse(hover.isArmed)
+    }
+
+    func testInvalidHoverClockAndPointDiscardArmedIntent() {
+        for invalidPoint in [CGPoint(x: CGFloat.nan, y: 0), CGPoint(x: 0, y: CGFloat.infinity)] {
+            var hover = DogHoverGesture()
+            _ = hover.update(.zero, now: 0, inside: true, allowed: true)
+            _ = hover.update(.zero, now: 0.4, inside: true, allowed: true)
+            XCTAssertTrue(hover.isArmed)
+            XCTAssertFalse(hover.update(invalidPoint, now: 0.5, inside: true, allowed: true))
+            XCTAssertFalse(hover.isArmed)
+        }
+        for time in [-1.0, Double.nan, Double.infinity] {
+            var hover = DogHoverGesture()
+            _ = hover.update(.zero, now: 0, inside: true, allowed: true)
+            _ = hover.update(.zero, now: 0.4, inside: true, allowed: true)
+            XCTAssertFalse(hover.update(.zero, now: time, inside: true, allowed: true))
+            XCTAssertFalse(hover.isArmed)
+        }
+    }
+
     func testClickAndStationaryHoldRespondOnlyOnceOnRelease() {
         var gesture = DogStrokeGesture()
         XCTAssertFalse(gesture.active)

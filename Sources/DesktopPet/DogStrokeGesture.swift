@@ -93,3 +93,33 @@ struct DogStrokeGesture {
         hypot(Double(a.x - b.x), Double(a.y - b.y))
     }
 }
+
+/// Hover intent uses the same bounded stroke feedback after a short dwell.
+/// Only the current sample and transient gesture state are retained.
+struct DogHoverGesture {
+    static let dwellDuration = 0.35
+    private var enteredAt: Double?
+    private var lastTime: Double?
+    private var stroke = DogStrokeGesture()
+    private(set) var isArmed = false
+
+    mutating func cancel() { self = Self() }
+
+    mutating func update(_ point: CGPoint, now: Double, inside: Bool, allowed: Bool) -> Bool {
+        guard allowed, inside, point.x.isFinite, point.y.isFinite, now.isFinite,
+              lastTime.map({ now >= $0 }) ?? true else {
+            cancel()
+            return false
+        }
+        lastTime = now
+        guard let enteredAt else { self.enteredAt = now; return false }
+        if !isArmed {
+            guard now - enteredAt >= Self.dwellDuration else { return false }
+            // Travel during the dwell never becomes an immediate response.
+            isArmed = true
+            stroke.begin(point, now: now, inside: true)
+            return false
+        }
+        return stroke.move(point, now: now, inside: true)
+    }
+}

@@ -5,20 +5,107 @@ import XCTest
 /// Exercises local AppKit event routing only. The panels are never shown and
 /// PetView.start() is deliberately not called: no global input or clock runs.
 final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
-    func testPositionIsLockedForPettingByDefault() async {
+    func testPositionIsUnlockedForSinglePressDraggingByDefault() async {
         await MainActor.run {
-            XCTAssertTrue(PetView(frame: .zero).positionLocked)
+            XCTAssertFalse(PetView(frame: .zero).positionLocked)
         }
     }
 
-    func testDoublePressTemporarilyDragsAtEveryOrientationAndReturnsToPetting() async throws {
+    func testHoverPassesThroughWithoutFeedbackAndOutsideAreasResetDwell() async throws {
+        try await MainActor.run {
+            for target in OutsideTarget.allCases {
+                let f = Fixture()
+                defer { f.close() }
+                f.routeHover(at: f.headA, time: 0)
+                f.routeHover(at: f.headB, time: 0.2)
+                f.routeHover(at: f.outsidePoint(target), time: 0.3)
+                XCTAssertTrue(f.pets.isEmpty)
+                f.routeHover(at: f.headA, time: 0.4)
+                f.routeHover(at: f.headB, time: 0.7)
+                XCTAssertTrue(f.pets.isEmpty, "Transparent padding, line and counter restart dwell")
+                f.routeHover(at: f.headA, time: 0.8)
+                XCTAssertTrue(f.pets.isEmpty)
+                f.routeHover(at: f.headB, time: 0.9)
+                XCTAssertEqual(f.pets.count, 1)
+                for time in [1.0, 2, 5, 10] { f.routeHover(at: f.headB, time: time) }
+                XCTAssertEqual(f.pets.count, 1, "A stationary physical pointer never repeats feedback")
+                XCTAssertFalse(f.pet.hasPointerCapture)
+                XCTAssertTrue(f.dragOffsets.isEmpty)
+                XCTAssertEqual(f.presses, 0)
+                XCTAssertEqual(f.releases, 0)
+            }
+        }
+    }
+
+    func testForeignButtonsAndMenusCancelHoverInsteadOfQueuingFeedback() async throws {
+        try await MainActor.run {
+            for buttons in [1, 2, 4, 0] {
+                let f = Fixture()
+                defer { f.close() }
+                f.routeHover(at: f.headA, time: 0)
+                f.routeHover(at: f.headA, time: 0.36)
+                if buttons == 0 { f.pet.allowsHoverInteraction = false }
+                f.routeHover(at: f.headB, buttons: buttons, time: 0.4)
+                XCTAssertTrue(f.pets.isEmpty)
+                if buttons != 0 { XCTAssertTrue(f.panel.ignoresMouseEvents) }
+                f.pet.allowsHoverInteraction = true
+                f.routeHover(at: f.headA, time: 0.5)
+                f.routeHover(at: f.headB, time: 0.7)
+                XCTAssertTrue(f.pets.isEmpty)
+                f.routeHover(at: f.headA, time: 0.86)
+                f.routeHover(at: f.headB, time: 1)
+                XCTAssertEqual(f.pets.count, 1)
+                XCTAssertFalse(f.pet.hasPointerCapture)
+            }
+        }
+    }
+
+    func testMouseDownCancelsArmedHoverAndStillPerformsAnOrdinaryClick() async throws {
+        try await MainActor.run {
+            let f = Fixture()
+            defer { f.close() }
+            f.routeHover(at: f.headA, time: 0)
+            f.routeHover(at: f.headA, time: 0.36)
+            try f.send(.leftMouseDown, at: f.headA)
+            f.routeHover(at: f.headB, buttons: 1, time: 0.5)
+            XCTAssertTrue(f.pets.isEmpty)
+            try f.send(.leftMouseUp, at: f.headA)
+            XCTAssertEqual(f.pets.count, 1)
+            f.routeHover(at: f.headB, time: 1)
+            f.routeHover(at: f.headA, time: 1.2)
+            XCTAssertEqual(f.pets.count, 1, "Release cannot reuse pre-press dwell")
+            XCTAssertFalse(f.pet.hasPointerCapture)
+            XCTAssertTrue(f.dragOffsets.isEmpty)
+        }
+    }
+
+    func testStopRestFocusLossAndRotationDiscardHoverIntent() async throws {
+        try await MainActor.run {
+            for reason in [Cancellation.explicit, .stop, .rest, .resignKey] {
+                let f = Fixture()
+                defer { f.close() }
+                f.routeHover(at: f.headA, time: 0)
+                f.routeHover(at: f.headA, time: 0.36)
+                f.cancel(reason)
+                f.routeHover(at: f.headB, time: 0.4)
+                f.routeHover(at: f.headA, time: 0.6)
+                XCTAssertTrue(f.pets.isEmpty, "\(reason)")
+                f.pet.cancelStroke() // The R path also clears hover without cancelling an unlocked drag.
+                f.routeHover(at: f.headB, time: 0.8)
+                f.routeHover(at: f.headA, time: 1)
+                XCTAssertTrue(f.pets.isEmpty)
+            }
+        }
+    }
+
+    func testSinglePressDragsAtEveryOrientationAndHoverWorksAfterRelease() async throws {
         try await MainActor.run {
             let placements: [(DogOrientation, CGFloat?)] = DogOrientation.allCases.map { ($0, nil) } + [(.bottom, 38)]
             for (orientation, topbarHeight) in placements {
-                for clickCount in [2, 3] {
+                for clickCount in [1, 2] {
                     let f = Fixture(orientation: orientation, topbarHeight: topbarHeight)
                     defer { f.close() }
-                    f.pet.positionLocked = true
+                    f.pet.positionLocked = false
                     let start: NSPoint, end: NSPoint
                     if topbarHeight != nil {
                         let layout = DogTopbarRenderer.layout(size: f.pet.bounds.size, scale: f.scale)
@@ -40,33 +127,36 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
                     let tremor = NSPoint(x: start.x + (end.x - start.x) * 3 / distance,
                                          y: start.y + (end.y - start.y) * 3 / distance)
                     try f.send(.leftMouseDragged, at: tremor, clickCount: clickCount)
-                    XCTAssertTrue(f.dragOffsets.isEmpty, "The second press still honors the drag threshold")
+                    XCTAssertTrue(f.dragOffsets.isEmpty, "A press still honors the drag threshold")
                     XCTAssertFalse(f.pet.motion.isDragging)
                     try f.send(.leftMouseDragged, at: end, clickCount: clickCount)
                     XCTAssertTrue(f.pet.hasPointerCapture)
                     XCTAssertTrue(f.pet.motion.isDragging)
-                    XCTAssertTrue(f.pet.positionLocked)
+                    XCTAssertFalse(f.pet.positionLocked)
                     XCTAssertEqual(f.dragOffsets.count, 1)
-                    XCTAssertEqual(f.pets.count, 1, "Temporary dragging must not emit a stroke")
+                    XCTAssertEqual(f.pets.count, 1, "Dragging must not emit a hover stroke")
                     try f.send(.leftMouseUp, at: end, clickCount: clickCount)
                     XCTAssertEqual(f.dragEnds.count, 1)
                     XCTAssertEqual(f.positionChanges, 1)
                     XCTAssertEqual(f.releases, 2)
                     XCTAssertFalse(f.pet.hasPointerCapture)
                     XCTAssertFalse(f.pet.motion.isDragging)
-                    XCTAssertTrue(f.pet.positionLocked)
+                    XCTAssertFalse(f.pet.positionLocked)
                     XCTAssertEqual(f.pets.count, 1)
                     let originalFrame = f.panel.frame
-                    try f.send(.leftMouseDown, at: start)
-                    try f.send(.leftMouseDragged, at: end)
-                    XCTAssertEqual(f.pets.count, 2, "A later single press resumes normal petting")
+                    f.pet.updateHover(at: start, pressedButtons: 0, hoverTime: 0)
+                    f.pet.updateHover(at: end, pressedButtons: 0, hoverTime: 0.36)
+                    XCTAssertEqual(f.pets.count, 1, "Travel before the dwell is discarded")
+                    f.pet.updateHover(at: start, pressedButtons: 0, hoverTime: 0.5)
+                    XCTAssertEqual(f.pets.count, 2)
+                    XCTAssertFalse(f.pet.hasPointerCapture)
                     XCTAssertFalse(f.pet.motion.isDragging)
                     XCTAssertEqual(f.panel.frame, originalFrame)
                     XCTAssertEqual(f.dragOffsets.count, 1)
-                    try f.send(.leftMouseUp, at: end)
-                    XCTAssertEqual(f.pets.count, 2)
+                    f.pet.updateHover(at: start, pressedButtons: 0, hoverTime: 10)
+                    XCTAssertEqual(f.pets.count, 2, "Stationary hover cannot repeat feedback")
                     XCTAssertEqual(f.dragEnds.count, 1)
-                    XCTAssertEqual(f.releases, 3)
+                    XCTAssertEqual(f.releases, 2)
                 }
             }
         }
@@ -92,31 +182,32 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
         }
     }
 
-    func testCancellingTemporaryDragRestoresPettingOnTheNextSinglePress() async throws {
+    func testCancellingNormalDragRequiresFreshHoverIntent() async throws {
         try await MainActor.run {
             for reason in [Cancellation.explicit, .stop, .rest, .resignKey] {
                 let f = Fixture()
                 defer { f.close() }
-                f.pet.positionLocked = true
-                try f.send(.leftMouseDown, at: f.headA, clickCount: 2)
-                try f.send(.leftMouseDragged, at: f.headB, clickCount: 2)
+                f.pet.positionLocked = false
+                try f.send(.leftMouseDown, at: f.headA)
+                try f.send(.leftMouseDragged, at: f.headB)
                 XCTAssertTrue(f.pet.motion.isDragging)
                 f.cancel(reason)
                 XCTAssertFalse(f.pet.hasPointerCapture)
                 XCTAssertFalse(f.pet.motion.isDragging)
-                XCTAssertTrue(f.pet.positionLocked)
+                XCTAssertFalse(f.pet.positionLocked)
                 XCTAssertEqual(f.releases, 1)
-                try f.send(.leftMouseUp, at: f.headB, clickCount: 2)
+                try f.send(.leftMouseUp, at: f.headB)
                 XCTAssertEqual(f.releases, 1)
                 XCTAssertTrue(f.pets.isEmpty)
                 XCTAssertTrue(f.dragEnds.isEmpty)
-                try f.send(.leftMouseDown, at: f.headA)
-                try f.send(.leftMouseDragged, at: f.headB)
+                f.pet.updateHover(at: f.headA, pressedButtons: 0, hoverTime: 0)
+                f.pet.updateHover(at: f.headB, pressedButtons: 0, hoverTime: 0.2)
+                XCTAssertTrue(f.pets.isEmpty)
+                f.pet.updateHover(at: f.headA, pressedButtons: 0, hoverTime: 0.36)
+                f.pet.updateHover(at: f.headB, pressedButtons: 0, hoverTime: 0.5)
                 XCTAssertEqual(f.pets.count, 1, "\(reason)")
                 XCTAssertFalse(f.pet.motion.isDragging)
-                try f.send(.leftMouseUp, at: f.headB)
-                XCTAssertEqual(f.releases, 2)
-                XCTAssertEqual(f.pets.count, 1)
+                XCTAssertEqual(f.releases, 1)
                 XCTAssertEqual(f.dragOffsets.count, 1)
                 XCTAssertTrue(f.dragEnds.isEmpty)
             }
@@ -337,16 +428,16 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
         try await MainActor.run {
             let f = Fixture(scale: 0.5, topbarHeight: 38)
             defer { f.close() }
-            f.pet.positionLocked = true
+            f.pet.positionLocked = false
             let layout = DogTopbarRenderer.layout(size: f.pet.bounds.size, scale: f.scale)
             let head = NSPoint(x: layout.offset.x + 100 * layout.scale,
                                y: layout.offset.y + 35 * layout.scale)
             XCTAssertTrue(f.pet.containsInteraction(head, includesBaseline: false))
             XCTAssertFalse(f.panel.isKeyWindow)
-            try f.send(.leftMouseDown, at: head, clickCount: 2)
+            try f.send(.leftMouseDown, at: head)
             let firstDrag = NSPoint(x: head.x, y: head.y - 45)
             let firstScreen = f.screenPoint(firstDrag)
-            try f.send(.leftMouseDragged, at: firstDrag, clickCount: 2)
+            try f.send(.leftMouseDragged, at: firstDrag)
             XCTAssertEqual(f.dragOffsets.count, 1)
             // App.setTopbarEnabled(false) clears selection while the same owned
             // drag is moving out of the menu band. It must not release capture.
@@ -358,10 +449,10 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(f.releases, 0)
             let lastScreen = NSPoint(x: firstScreen.x + 15, y: firstScreen.y - 20)
             let lastLocal = f.pet.convert(f.panel.convertPoint(fromScreen: lastScreen), from: nil)
-            try f.send(.leftMouseDragged, at: lastLocal, clickCount: 2)
+            try f.send(.leftMouseDragged, at: lastLocal)
             XCTAssertEqual(f.dragOffsets.count, 2, "The detached dog must continue following this drag")
             XCTAssertTrue(f.pet.hasPointerCapture)
-            try f.send(.leftMouseUp, at: lastLocal, clickCount: 2)
+            try f.send(.leftMouseUp, at: lastLocal)
             XCTAssertEqual(f.dragEnds.count, 1)
             let actualDrop = try XCTUnwrap(f.dragEnds.first)
             XCTAssertEqual(actualDrop.x, lastScreen.x, accuracy: 0.00001)
@@ -369,7 +460,7 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
             XCTAssertEqual(f.positionChanges, 1)
             XCTAssertEqual(f.releases, 1)
             XCTAssertFalse(f.pet.hasPointerCapture)
-            XCTAssertTrue(f.pet.positionLocked)
+            XCTAssertFalse(f.pet.positionLocked)
             XCTAssertTrue(f.pets.isEmpty)
         }
     }
@@ -389,7 +480,7 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
                 XCTAssertTrue(f.pet.hasPointerCapture)
                 let petsBeforeRotation = f.pets.count
                 f.pet.keyDown(with: try rotationKey(in: f.panel))
-                let stroke = locked && clickCount < 2
+                let stroke = locked
                 XCTAssertEqual(capturesAtRotation, [!stroke])
                 XCTAssertEqual(f.pet.hasPointerCapture, !stroke)
                 XCTAssertEqual(f.releases, stroke ? 1 : 0)
@@ -501,6 +592,10 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
 
         func screenPoint(_ point: NSPoint) -> NSPoint {
             panel.convertPoint(toScreen: pet.convert(point, to: nil))
+        }
+
+        func routeHover(at point: NSPoint, buttons: Int = 0, time: TimeInterval) {
+            panel.updatePointerRouting(at: pet.convert(point, to: companion), pressedButtons: buttons, hoverTime: time)
         }
 
         func outsidePoint(_ target: OutsideTarget) -> NSPoint {

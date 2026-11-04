@@ -116,7 +116,7 @@ public:
         bool content=created||locked!=positionLocked;bool resized=created||scale!=next.scale;
         dismiss=std::move(callback);locked=positionLocked;placement=next;scale=next.scale;
         if(resized)fonts();
-        if(content){SetWindowTextW(first,locked?L"双击按住拖动我":L"按住拖动我");SetWindowTextW(second,locked?L"按住来回摸摸我":L"点一下摸摸我");}
+        if(content){SetWindowTextW(first,locked?L"右键解锁后可拖动":L"按住拖动我");SetWindowTextW(second,L"来回晃晃摸摸我");}
         if(geometry){const auto r=next.frame;SetWindowPos(window,nullptr,int(r.left),int(r.top),int(r.right-r.left),int(r.bottom-r.top),SWP_NOZORDER|SWP_NOACTIVATE);layout();}
         if(!shown){ShowWindow(window,SW_SHOWNOACTIVATE);shown=true;}
         return true;

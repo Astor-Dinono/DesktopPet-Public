@@ -41,14 +41,14 @@ int main(){
         assert(DeleteFileW(name));assert(CreateDirectoryW(name,nullptr));
         App app(instance);
         // Do not call Settings::init(): that targets the user's real AppData.
-        assert(app.settings.positionLocked);
+        assert(!app.settings.positionLocked);
         app.settings.folder=name;app.settings.file=std::wstring(name)+L"\\settings.ini";
         app.settings.counts.enabled=true;app.settings.counts.total=123456;
         app.settings.counts.today=321;app.settings.counts.date=date();
         app.settings.always=true;app.settings.nap=0;app.dirty=true;
         assert(!app.inputActive);
         assert(app.settings.save());
-        assert(GetPrivateProfileIntW(L"Dog",L"PositionLocked",99,app.settings.file.c_str())==1);
+        assert(GetPrivateProfileIntW(L"Dog",L"PositionLocked",99,app.settings.file.c_str())==0);
 
         WNDCLASSEXW cls{sizeof(cls)};cls.style=CS_DBLCLKS;cls.lpfnWndProc=App::proc;cls.hInstance=instance;
         cls.lpszClassName=L"DesktopPet.PettingTest";assert(RegisterClassExW(&cls));
@@ -147,48 +147,56 @@ int main(){
         SendMessageW(window,WM_LBUTTONUP,0,localPoint);
         assert(app.hearts.items.size()==1);
         SendMessageW(window,WM_LBUTTONDBLCLK,MK_LBUTTON,localPoint);
-        assert(app.pressed&&!app.pressIsStroke&&!app.stroke.active());
+        assert(app.pressed&&app.pressIsStroke&&app.stroke.active());
         assert(app.settings.positionLocked);
         SendMessageW(window,WM_LBUTTONUP,0,localPoint);
         assertReleased(app);assert(app.hearts.items.size()==2);
         assert(app.petExpression.value(now()+.1)==0);unchangedCounts(app);
 
-        // Only the second press temporarily permits dragging. The existing
-        // four-logical-pixel threshold, landing feedback and saved lock remain.
-        app.hearts.items.clear();
-        const dog::Point doubleDragPoint{std::round(a.x),std::round(a.y)};
-        app.beginPointer(doubleDragPoint,31,true);
-        app.movePointer(doubleDragPoint+dog::Point{4,0},31.1);
-        assert(!app.dragging&&same(app.center,originalCenter));
-        app.movePointer(doubleDragPoint+dog::Point{30,18},31.2);
-        assert(app.dragging&&!app.pressIsStroke&&app.settings.positionLocked);
-        assert(same(app.center,originalCenter+dog::Point{30,18}));
-        app.endPointer(doubleDragPoint+dog::Point{30,18});assertReleased(app);
-        assert(app.hearts.items.empty()&&app.settings.positionLocked);unchangedCounts(app);
-        app.center=originalCenter;assert(app.draw(0));
-        app.beginPointer(a,32);
-        assert(app.pressIsStroke&&app.stroke.active());app.cancelPointer();assertReleased(app);
-
-        // The visible badge retains the existing drag surface, but is not fur:
-        // neither a quiet double press nor travel from it can start petting.
-        app.beginPointer(badge,33,true);app.endPointer(badge);
-        assert(app.hearts.items.empty()&&app.petExpression.value(now()+.1)==0);
-        app.beginPointer(badge,34,true);app.movePointer(a,34.2);
-        assert(app.dragging&&!app.pressIsStroke&&!app.stroke.active());
-        app.endPointer(a);assertReleased(app);
-        assert(app.hearts.items.empty()&&app.settings.positionLocked);unchangedCounts(app);
-        app.center=originalCenter;assert(app.draw(0));
+        // A locked double-click is an ordinary second press, not a hidden
+        // unlock. Dragging is restored by the explicit saved lock preference.
+        app.hearts.items.clear();app.beginPointer(a,31);app.movePointer(b,31.2);
+        assert(!app.dragging&&app.pressIsStroke&&app.settings.positionLocked);
+        assert(same(app.center,originalCenter));app.endPointer(b);assertReleased(app);
 
         // Actual capture transfer dispatches WM_CAPTURECHANGED to the pet.
-        for(bool doubleClick:{false,true}){
-            app.hearts.items.clear();app.beginPointer(a,40,doubleClick);
-            SetCapture(peer);assert(GetCapture()==peer);assertReleased(app);
-            app.movePointer(b,40.5);app.endPointer(b);assert(app.hearts.items.empty());
-            ReleaseCapture();
-            app.beginPointer(a,50,doubleClick);SendMessageW(window,WM_CANCELMODE,0,0);
-            assertReleased(app);app.movePointer(b,50.5);app.endPointer(b);
-            assert(app.hearts.items.empty()&&app.settings.positionLocked);unchangedCounts(app);
+        app.hearts.items.clear();app.beginPointer(a,40);
+        SetCapture(peer);assert(GetCapture()==peer);assertReleased(app);
+        app.movePointer(b,40.5);app.endPointer(b);assert(app.hearts.items.empty());ReleaseCapture();
+        app.beginPointer(a,50);SendMessageW(window,WM_CANCELMODE,0,0);
+        assertReleased(app);app.movePointer(b,50.5);app.endPointer(b);
+        assert(app.hearts.items.empty()&&app.settings.positionLocked);unchangedCounts(app);
+
+        // Unlocked hover uses the same exact head/tail hit path, excludes the
+        // badge/transparent corners, and never moves the window or adds counts.
+        app.settings.positionLocked=false;app.center=originalCenter;assert(app.draw(0));
+        app.petExpression.clear();app.hearts.items.clear();
+        app.moveHover(a,70,false);assert(app.hoverStroke.active());
+        app.moveHover(b,70.2,false);assert(app.hearts.items.empty());
+        app.validateHover(b,70.36,false,true);assert(app.hoverStroke.armed());
+        app.moveHover(a,70.5,false);assert(app.hearts.items.size()==1);
+        assert(app.petExpression.value(70.6)>0&&same(app.center,originalCenter));unchangedCounts(app);
+        const auto hoveredEffects=app.hearts.items.size();
+        app.validateHover(a,71,false,true);app.moveHover(a,71.1,false);
+        assert(app.hearts.items.size()==hoveredEffects); // stationary, even after dwell/rate timeout
+        app.moveHover(badge,72,false);assert(!app.hoverStroke.active());
+        app.moveHover(a,72.1,false);assert(!app.hoverStroke.armed());
+        app.moveHover(outside,72.2,false);assert(!app.hoverStroke.active());
+        app.moveHover(a,73,false);app.validateHover(a,73.4,true,true);
+        assert(!app.hoverStroke.active()); // any pressed button/external drag
+        app.moveHover(a,74,false);app.validateHover(a,74.4,false,false);
+        assert(!app.hoverStroke.active()); // another window now covers the pointer
+        for(UINT cancel:{WM_MOUSELEAVE,WM_CANCELMODE,WM_RBUTTONDOWN,WM_MBUTTONDOWN,WM_XBUTTONDOWN}){
+            app.moveHover(a,75,false);assert(app.hoverStroke.active());
+            SendMessageW(window,cancel,0,0);assert(!app.hoverStroke.active());
         }
+        app.moveHover(a,76,false);app.beginPointer(a,76.4);
+        assert(!app.hoverStroke.active()&&!app.pressIsStroke);app.cancelPointer();
+        app.menuOpen=true;app.moveHover(a,77,false);assert(!app.hoverStroke.active());app.menuOpen=false;
+        app.turning=true;app.moveHover(a,78,false);assert(!app.hoverStroke.active());app.turning=false;
+        app.visible=false;app.moveHover(a,79,false);assert(!app.hoverStroke.active());app.visible=true;
+        app.suspended=true;app.moveHover(a,80,false);assert(!app.hoverStroke.active());app.suspended=false;
+        unchangedCounts(app);app.hearts.items.clear();
 
         // Existing drag semantics remain intact when unlocked.
         app.settings.positionLocked=false;app.petHitReady=false;
@@ -223,5 +231,5 @@ int main(){
         assert(UnregisterClassW(cls.lpszClassName,instance));
     }
     GdiplusShutdown(token);
-    std::cout<<"PASS: native dog-only hit geometry, default petting, temporary second-click drag, ordinary double clicks, badge exclusion, capture/cancel, unchanged counts, unlocked dragging, menu and private-fixture settings\n";
+    std::cout<<"PASS: native dog-only hit geometry, hover dwell petting, default single-press dragging, ordinary double clicks, badge exclusion, capture/cancel, unchanged counts, unlocked dragging, menu and private-fixture settings\n";
 }

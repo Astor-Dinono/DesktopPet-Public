@@ -14,7 +14,7 @@ enum class Icon {None,Heart,Tail,Moon,Sparkles,Sliders,Timer,Pointer,Hide,More,C
 enum ControlID {Back=400,Close,Appearance,Sleep,Counts,More,SizeChoice,TailChoice,Title,Hint,Today,Total};
 struct Rect { double x,y,w,h; };
 struct Snapshot {
-    bool visible=true,asleep=false,counting=false,always=false,positionLocked=true;
+    bool visible=true,asleep=false,counting=false,always=false,positionLocked=false;
     unsigned effects=1;int nap=180,size=1,tail=80;
     std::uint64_t today=0,total=0;
 };
@@ -52,7 +52,7 @@ inline Plan layout(Page page,const Snapshot& s){
     }
     case Page::Appearance:
         add(LockPosition,Kind::Check,Style::Row,{12,y,228,32},L"锁定位置",Icon::None,L"",s.positionLocked);y+=32;
-        label(Hint,s.positionLocked?L"按住摸摸 · 双击第二下拖动":L"已解锁 · 按住可直接拖动");
+        label(Hint,s.positionLocked?L"来回晃晃摸摸 · 解锁后拖动":L"来回晃晃摸摸 · 按住拖动");
         row(Rotate,L"转个身",Icon::Rotate,L"选中后 R");row(Snap,L"贴到当前朝向的边缘",Icon::Edge);line();
         add(Title+20,Kind::Label,Style::Field,{20,y,108,36},L"小狗大小");
         add(SizeChoice,Kind::Combo,Style::Field,{136,y+4,96,28},L"小狗大小",Icon::None,L"",false,false,s.size);y+=38;

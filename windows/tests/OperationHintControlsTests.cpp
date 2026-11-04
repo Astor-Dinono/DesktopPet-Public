@@ -24,7 +24,7 @@ int main(){
         ShowWindow(window,SW_SHOWNOACTIVATE);HWND focusBefore=GetFocus();assert(app.draw(0));
         HWND hint=app.operationHint.windowHandle();assert(hint&&app.operationHint.isVisible());assert(GetFocus()==focusBefore);
         auto label=[&](int id){wchar_t text[64]{};assert(GetWindowTextW(GetDlgItem(hint,id),text,64));return std::wstring(text);};
-        assert(label(dog::OperationHint::FirstLine)==L"双击按住拖动我");assert(label(dog::OperationHint::SecondLine)==L"按住来回摸摸我");
+        assert(label(dog::OperationHint::FirstLine)==L"按住拖动我");assert(label(dog::OperationHint::SecondLine)==L"来回晃晃摸摸我");
         assert(label(dog::OperationHint::CloseButton)==L"关闭"&&label(dog::OperationHint::NeverButton)==L"不再提示");
         wchar_t controlClass[32]{};assert(GetClassNameW(GetDlgItem(hint,dog::OperationHint::CloseButton),controlClass,32));assert(_wcsicmp(controlClass,L"Button")==0);
         assert(GetWindowLongPtrW(GetDlgItem(hint,dog::OperationHint::NeverButton),GWL_STYLE)&WS_TABSTOP);
@@ -38,13 +38,13 @@ int main(){
         click(dog::OperationHint::NeverButton);assert(!app.hintState.requested&&!app.settings.operationHints);app.save();
         assert(GetPrivateProfileIntW(L"Dog",L"OperationHints",99,app.settings.file.c_str())==0);
         app.command(ShowOperationHint);assert(app.draw(0));assert(app.operationHint.isVisible()&&!app.settings.operationHints);
-        app.settings.positionLocked=false;assert(app.draw(0));
-        assert(label(dog::OperationHint::FirstLine)==L"按住拖动我"&&label(dog::OperationHint::SecondLine)==L"点一下摸摸我");
+        app.settings.positionLocked=true;assert(app.draw(0));
+        assert(label(dog::OperationHint::FirstLine)==L"右键解锁后可拖动"&&label(dog::OperationHint::SecondLine)==L"来回晃晃摸摸我");
         app.menu({LONG(app.center.x),LONG(app.center.y)});assert(!app.operationHint.isVisible()&&app.hintState.requested);
         app.contextMenu.close();assert(app.draw(0));assert(app.operationHint.isVisible());
         app.setNap(true);assert(!app.operationHint.isVisible()&&app.hintState.requested);assert(app.draw(0));assert(!app.operationHint.isVisible());
         app.activity(false);assert(app.draw(0));assert(app.operationHint.isVisible());
-        app.beginPointer(app.center,10,true);assert(!app.operationHint.isVisible()&&app.hintState.requested);
+        app.beginPointer(app.center,10);assert(!app.operationHint.isVisible()&&app.hintState.requested);
         app.cancelPointer();assert(app.draw(0));assert(app.operationHint.isVisible());
         click(dog::OperationHint::CloseButton);app.hintState.beginSession(app.settings.operationHints);assert(app.draw(0));assert(!app.operationHint.isVisible());
         assert(!app.inputActive&&app.settings.counts.total==4321&&app.settings.counts.today==21);

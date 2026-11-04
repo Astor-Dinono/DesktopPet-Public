@@ -12,7 +12,7 @@ using namespace dog::menu;
 const Item& find(const Plan& p,int id){for(const auto& item:p.items)if(item.id==id)return item;assert(false);return p.items.front();}
 int main(){
     const Page pages[]={Page::Home,Page::Appearance,Page::Effects,Page::Sleep,Page::Counts,Page::More};
-    Snapshot s;assert(s.positionLocked);s.today=std::numeric_limits<std::uint64_t>::max();s.total=s.today;
+    Snapshot s;assert(!s.positionLocked);s.today=std::numeric_limits<std::uint64_t>::max();s.total=s.today;
     for(unsigned mask=0;mask<16;++mask)for(int nap:{0,30,60,180,300})for(Page page:pages){
         s.effects=mask;s.nap=nap;Plan p=layout(page,s);std::set<int> ids;
         assert(p.width==252&&p.height<=layout(Page::Home,s).height);

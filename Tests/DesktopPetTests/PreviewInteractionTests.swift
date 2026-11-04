@@ -3,6 +3,81 @@ import XCTest
 @testable import DesktopPet
 
 final class PreviewInteractionTests: XCTestCase, @unchecked Sendable {
+    func testPreviewHoverRequiresVisibleUnobscuredWindowAndNoMouseButtons() async {
+        await MainActor.run {
+            _ = NSApplication.shared
+            for (eligible, hitsWindow, buttons) in [(false, true, 0), (true, false, 0), (true, true, 1), (true, true, 2)] {
+                var time = 0.0
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 366, height: 204),
+                                      styleMask: [.titled], backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                let canvas = DogPreviewCanvas(frame: NSRect(x: 0, y: 0, width: 366, height: 204),
+                                              scale: 0.62, name: "测试小狗", clock: { time })
+                window.contentView = canvas
+                defer { canvas.stop(); window.contentView = nil; window.close() }
+                var pets = 0
+                canvas.pet.onPet = { _ in pets += 1; return true }
+                let a = NSPoint(x: 50, y: 25), b = NSPoint(x: 75, y: 25)
+                canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                time = 0.36
+                canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                time = 0.4
+                canvas.updateHover(at: b, pressedButtons: buttons, windowEligible: eligible, pointerHitsWindow: hitsWindow)
+                XCTAssertEqual(pets, 0)
+                time = 0.5
+                canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                time = 0.7
+                canvas.updateHover(at: b, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                XCTAssertEqual(pets, 0, "Becoming visible must start a fresh dwell")
+                time = 0.86
+                canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                time = 1
+                canvas.updateHover(at: b, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                XCTAssertEqual(pets, 1)
+                time = 10
+                canvas.updateHover(at: b, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+                XCTAssertEqual(pets, 1)
+                XCTAssertFalse(canvas.pet.hasPointerCapture)
+            }
+        }
+    }
+
+    func testPreviewRotationCancelsHoverAndRequiresFreshDwellAfterTurning() async {
+        await MainActor.run {
+            _ = NSApplication.shared
+            var time = 0.0
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 366, height: 204),
+                                  styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let canvas = DogPreviewCanvas(frame: NSRect(x: 0, y: 0, width: 366, height: 204),
+                                          scale: 0.62, name: "测试小狗", clock: { time })
+            window.contentView = canvas
+            defer { canvas.stop(); window.contentView = nil; window.close() }
+            var pets = 0
+            canvas.pet.onPet = { _ in pets += 1; return true }
+            canvas.updateHover(at: NSPoint(x: 50, y: 25), pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            time = 0.36
+            canvas.updateHover(at: NSPoint(x: 50, y: 25), pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            canvas.rotate()
+            time = 0.4
+            canvas.updateHover(at: NSPoint(x: 75, y: 25), pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            XCTAssertEqual(pets, 0)
+            time = 2
+            canvas.advanceAnimation(at: time)
+            let transform = DogOrientation.left.transform(size: canvas.canonicalSize)
+            let a = NSPoint(x: 50, y: 25).applying(transform), b = NSPoint(x: 75, y: 25).applying(transform)
+            canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            time = 2.2
+            canvas.updateHover(at: b, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            XCTAssertEqual(pets, 0)
+            time = 2.36
+            canvas.updateHover(at: a, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            time = 2.5
+            canvas.updateHover(at: b, pressedButtons: 0, windowEligible: true, pointerHitsWindow: true)
+            XCTAssertEqual(pets, 1)
+        }
+    }
+
     func testDragMovesOnlyThePreviewDogSnapsToTheEdgeAndKeepsItsOrientation() async throws {
         try await MainActor.run {
             _ = NSApplication.shared

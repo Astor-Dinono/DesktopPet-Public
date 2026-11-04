@@ -188,7 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pet = PetView(frame: NSRect(origin: .zero, size: size))
         pet.setAutoNap(autoNap)
         pet.tailSize = tailSize
-        pet.positionLocked = UserDefaults.standard.object(forKey: PetView.positionLockKey) as? Bool ?? true
+        pet.positionLocked = UserDefaults.standard.object(forKey: PetView.positionLockKey) as? Bool ?? false
         pet.onDragEnded = { [weak self] in self?.finishDesktopDrag(at: $0) }
         companion = DogCompanionView(pet: pet, scale: scale)
         companion.orientation = orientation
@@ -208,9 +208,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pet.onDragOffset = { [weak self] offset, point in self?.dragDesktop(to: offset, pointer: point) }
         pet.updateInteractionHelp()
         pet.onInteractionFrame = { [weak self] in
-            self?.advanceTurn()
-            self?.panel.refreshPointerRouting()
-            self?.updateInteractionHint()
+            guard let self else { return }
+            self.advanceTurn()
+            self.pet.allowsHoverInteraction = !self.suspended && self.openHintMenus.isEmpty && self.turning == nil
+            self.panel.refreshPointerRouting()
+            self.updateInteractionHint()
         }
         pet.onPointerPress = { [weak self] in
             guard let self else { return }
@@ -323,7 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let appearance = NSMenu()
         positionLockItem = item("锁定位置", action: #selector(togglePositionLock))
         positionLockItem.state = pet.positionLocked ? .on : .off
-        positionLockItem.toolTip = "按住摸摸；双击并按住第二下可临时拖动，松手自动恢复"
+        positionLockItem.toolTip = "锁定后保持位置不动，也可按住来回摸摸；解锁后单次按住即可拖动"
         appearance.addItem(positionLockItem)
         appearance.addItem(.separator())
         let sizes = NSMenu()
@@ -590,6 +592,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         openHintMenus.insert(ObjectIdentifier(menu))
+        pet.allowsHoverInteraction = false
         interactionHint.hide()
         pet.cancelPointerInteraction()
         effectChoices?.refresh()
@@ -601,7 +604,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         openHintMenus.remove(ObjectIdentifier(menu))
-        DispatchQueue.main.async { [weak self] in self?.updateInteractionHint() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.pet.allowsHoverInteraction = !self.suspended && self.openHintMenus.isEmpty && self.turning == nil
+            self.updateInteractionHint()
+        }
     }
 
     @objc private func showInteractionHint() {
