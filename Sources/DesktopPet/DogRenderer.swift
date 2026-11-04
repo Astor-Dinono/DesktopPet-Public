@@ -130,13 +130,14 @@ enum DogRenderer {
     }
 
     static func contains(_ point: NSPoint, size: NSSize, pose: PetPose = PetPose(),
-                         angle: Double = 0, bend: Double = 0, tailSize: DogTailSize = .small) -> Bool {
+                         angle: Double = 0, bend: Double = 0, tailSize: DogTailSize = .small,
+                         includesBaseline: Bool = true) -> Bool {
         let scale = min(size.width / canvas.width, size.height / canvas.height)
         guard scale > 0 else { return false }
         let local = NSPoint(x: (point.x - (size.width - canvas.width * scale) / 2) / scale,
                             y: (point.y - 1) / scale)
         // Include the visible ink, but not the transparent margins or floating effects.
-        if (0...canvas.width).contains(local.x), abs(local.y - baselineY) <= 1.25 { return true }
+        if includesBaseline, (0...canvas.width).contains(local.x), abs(local.y - baselineY) <= 1.25 { return true }
         guard local.y >= baselineY else { return false }
         func hits(_ path: NSBezierPath, _ transform: CGAffineTransform) -> Bool {
             let p = local.applying(transform.inverted())
@@ -157,8 +158,54 @@ enum DogRenderer {
             .scaledBy(x: scale, y: scale))
     }
 
+    /// A stable obstacle for nearby UI, not an interaction region. Construct
+    /// the vector envelope once so breathing and wagging cannot jitter a hint.
+    /// Sleep letters and independently floating effects are intentionally absent.
+    private static let interactionHintEnvelope: CGRect = {
+        let clip = CGRect(x: 0, y: baselineY, width: canvas.width, height: canvas.height - baselineY)
+        let headInk = headOutline.cgPath.copy(strokingWithWidth: 3.6,
+            lineCap: .round, lineJoin: .round, miterLimit: 10)
+        // PetMotion breath reaches ±1.35 while asleep; DuangMotion bounds
+        // squash at ±0.20. Wake inhale is 0.014; 0.03 also leaves room for an
+        // interrupted rest transition. These two poses bound both affine axes.
+        var wide = headTransform(PetPose(breath: -1.35, sleepSettle: 1, squash: 0.20))
+        var tall = headTransform(PetPose(breath: 1.35, wakeStretch: 0.03, squash: -0.20))
+        let head = headInk.copy(using: &wide)!.boundingBoxOfPath
+            .union(headInk.copy(using: &tall)!.boundingBoxOfPath).intersection(clip)
+
+        // The largest tail is sufficient for both menu sizes. Bound the bend
+        // displacement (nominal ±0.36, conservatively ±0.45), then enclose the
+        // resulting path in a circle around its actual pivot. A circle contains
+        // every root rotation, including values between sampled tail frames.
+        let root = p(574, 280)
+        let bentTail = tailPath(tailSize: .original).cgPath.boundingBoxOfPath
+            .insetBy(dx: -sin(0.45) * 29, dy: -0.45 * 2.5)
+        let radius = [
+            hypot(bentTail.minX - root.x, bentTail.minY - root.y),
+            hypot(bentTail.minX - root.x, bentTail.maxY - root.y),
+            hypot(bentTail.maxX - root.x, bentTail.minY - root.y),
+            hypot(bentTail.maxX - root.x, bentTail.maxY - root.y)].max()! + 1.8
+        let tail = CGRect(x: root.x - radius, y: root.y - radius,
+                          width: radius * 2, height: radius * 2).intersection(clip)
+        let baseline = CGRect(x: -1.25, y: baselineY - 1.25,
+                              width: canvas.width + 2.5, height: 2.5)
+        // One canonical point for edge antialiasing; not the 148-point canvas.
+        return head.union(tail).union(baseline).insetBy(dx: -1, dy: -1)
+    }()
+
+    /// Uses precisely draw()'s centering, uniform scale, and one-point y offset.
+    /// Callers apply the existing orientation/turn or topbar transform afterwards.
+    static func interactionHintBounds(size: NSSize) -> NSRect {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else { return .null }
+        let scale = min(size.width / canvas.width, size.height / canvas.height)
+        return interactionHintEnvelope.applying(CGAffineTransform(
+            translationX: (size.width - canvas.width * scale) / 2, y: 1)
+            .scaledBy(x: scale, y: scale))
+    }
+
     static func draw(in context: CGContext, size: NSSize, pose: PetPose = PetPose(),
-                     angle: Double = 0, bend: Double = 0, blink: Double = 0, tailSize: DogTailSize = .small) {
+                     angle: Double = 0, bend: Double = 0, blink: Double = 0, tailSize: DogTailSize = .small,
+                     petting: Double = 0) {
         context.saveGState()
         defer { context.restoreGState() }
         let scale = min(size.width / canvas.width, size.height / canvas.height)
@@ -194,10 +241,16 @@ enum DogRenderer {
                 cheek.fill()
             }
         }
-        // Sleeping and blinking share a single filled eye contour, never two overlaid eyes.
+        // Sleep retains the original eye. Petting briefly hands off to the selected >< lid.
         let closed = 1 - (1 - pose.sleep) * (1 - blink)
-        drawEye(at: p(200, 198), closed: closed)
-        drawEye(at: p(398, 218), closed: closed)
+        let happy = DogSqueezeEyes.effectiveAmount(petting: petting, sleep: pose.sleep, reducedMotion: pose.reducedMotion)
+        if happy > 0 {
+            DogSqueezeEyes.draw(at: p(200, 198), left: true, normalClosed: closed, amount: happy)
+            DogSqueezeEyes.draw(at: p(398, 218), left: false, normalClosed: closed, amount: happy)
+        } else {
+            drawEye(at: p(200, 198), closed: closed)
+            drawEye(at: p(398, 218), closed: closed)
+        }
 
         let noseCenter = p(285, 206)
         ink.setFill()
@@ -221,6 +274,11 @@ enum DogRenderer {
     }
 
     static func drawEye(at center: NSPoint, closed: Double) {
+        let eye = eyeOutline(at: center, closed: closed)
+        ink.setFill(); eye.fill()
+    }
+
+    static func eyeOutline(at center: NSPoint, closed: Double) -> NSBezierPath {
         let halfWidth = 5.4 + closed * 0.9
         let halfHeight = 5.4 * (1 - closed) + closed * 0.65
         let sag = -closed * 1.8
@@ -242,7 +300,7 @@ enum DogRenderer {
                   controlPoint1: NSPoint(x: center.x - halfWidth * k, y: bottom),
                   controlPoint2: NSPoint(x: center.x - halfWidth, y: center.y + (bottom - center.y) * k))
         eye.close()
-        ink.setFill(); eye.fill()
+        return eye
     }
 
     static func drawBubble(_ pose: PetPose, in context: CGContext) {
@@ -302,7 +360,7 @@ enum DogRenderer {
     }
 
     static func renderPNG(angle: Double = 0, bend: Double = 0, pose: PetPose = PetPose(), blink: Double = 0,
-                          to url: URL, background: NSColor? = nil) throws {
+                          petting: Double = 0, to url: URL, background: NSColor? = nil) throws {
         let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 780, pixelsHigh: 444,
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
             colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
@@ -314,7 +372,7 @@ enum DogRenderer {
             background.setFill()
             NSBezierPath(rect: NSRect(origin: .zero, size: canvas)).fill()
         }
-        draw(in: graphics.cgContext, size: canvas, pose: pose, angle: angle, bend: bend, blink: blink)
+        draw(in: graphics.cgContext, size: canvas, pose: pose, angle: angle, bend: bend, blink: blink, petting: petting)
         NSGraphicsContext.restoreGraphicsState()
         try bitmap.representation(using: .png, properties: [:])!.write(to: url)
     }

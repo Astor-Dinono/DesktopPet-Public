@@ -7,6 +7,7 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
     private let onPinDesktop: () -> Void
     private let onHideDesktop: () -> Void
     private var suspended = false
+    private let subtitle = NSTextField(labelWithString: "")
 
     init(desktopDog: PetView, autoNap: AutoNap, onPet: @escaping (NSPoint) -> Bool,
          onEffectsFrame: @escaping () -> Void, onEffectsCleared: @escaping () -> Void,
@@ -19,6 +20,7 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         stage.dogs.forEach { $0.setAutoNap(autoNap) }
         stage.dogs.forEach { $0.tailSize = desktopDog.tailSize }
+        setPositionLocked(desktopDog.positionLocked)
         stage.dogs.forEach {
             $0.onPet = onPet
             $0.onEffectsFrame = onEffectsFrame
@@ -33,7 +35,6 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
         title.font = .systemFont(ofSize: 17, weight: .semibold)
         title.frame = NSRect(x: 24, y: 383, width: 572, height: 25)
         content.addSubview(title)
-        let subtitle = NSTextField(labelWithString: "拖动到边缘自动贴合 · 点击选中后按 R 旋转 · 点击空白取消选择")
         subtitle.font = .systemFont(ofSize: 12)
         subtitle.textColor = .secondaryLabelColor
         subtitle.frame = NSRect(x: 24, y: 358, width: 572, height: 20)
@@ -107,6 +108,12 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
     func stop() { stage.stop() }
     func setAutoNap(_ option: AutoNap) { stage.dogs.forEach { $0.setAutoNap(option) } }
     func setTailSize(_ size: DogTailSize) { stage.dogs.forEach { $0.tailSize = size } }
+    func setPositionLocked(_ locked: Bool) {
+        stage.dogs.forEach { $0.positionLocked = locked }
+        subtitle.stringValue = locked
+            ? "按住来回摸摸 · 双击按住第二下拖动 · 松手恢复摸摸"
+            : "拖动到边缘自动贴合 · 点击选中后按 R 旋转 · 点击空白取消选择"
+    }
     func keyboardPress() {
         guard window?.isVisible == true, window?.isMiniaturized == false else { return }
         stage.dogs.forEach { $0.keyboardPress() }
@@ -261,6 +268,7 @@ final class DogPreviewCanvas: NSView {
     }
 
     func rotate() {
+        pet.cancelStroke()
         let time = clock()
         advanceAnimation(at: time)
         orientation = DogOrientation(rawValue: (orientation.rawValue + 90) % 360) ?? .bottom

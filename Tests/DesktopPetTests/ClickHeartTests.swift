@@ -134,6 +134,7 @@ final class ClickHeartTests: XCTestCase, @unchecked Sendable {
             let panel = PetPanel(contentRect: NSRect(x: 0, y: 0, width: 130, height: 74),
                                  styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             let pet = PetView(frame: NSRect(x: 0, y: 0, width: 130, height: 74))
+            pet.positionLocked = false
             panel.contentView = pet
             var effects = ClickHeartMotion()
             var emissions = 0, clears = 0

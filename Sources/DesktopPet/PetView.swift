@@ -36,6 +36,7 @@ final class PetPanel: NSPanel {
     }
 
     override func resignKey() {
+        ((contentView as? DogCompanionView)?.pet ?? contentView as? PetView)?.cancelPointerInteraction()
         super.resignKey()
         isRotationSelected = false
         ((contentView as? DogCompanionView)?.pet ?? contentView as? PetView)?.isRotationSelected = false
@@ -68,6 +69,7 @@ final class PetPanel: NSPanel {
     }
 
     func stopPointerRouting() {
+        ((contentView as? DogCompanionView)?.pet ?? contentView as? PetView)?.cancelPointerInteraction()
         clearRotationSelection()
         if let globalPointerMonitor { NSEvent.removeMonitor(globalPointerMonitor) }
         if let localPointerMonitor { NSEvent.removeMonitor(localPointerMonitor) }
@@ -112,10 +114,18 @@ final class PetView: NSView {
                 setAccessibilityLabel("小狗，点击摸摸，拖放回弹")
                 setAccessibilityHelp("点击摸摸并选中，按 R 平滑旋转 90°；拖到屏幕顶部附近松手可进入顶栏，往下拖出回到桌面。")
             }
+            updateInteractionHelp()
         }
     }
     var topbarScale: Double = 0.5 { didSet { needsDisplay = true } }
     var tailSize: DogTailSize = .small { didSet { needsDisplay = true } }
+    static let positionLockKey = "dog.positionLocked"
+    var positionLocked = true {
+        didSet {
+            if oldValue != positionLocked { cancelPointerInteraction() }
+            updateInteractionHelp()
+        }
+    }
     var motion = PetMotion(now: ProcessInfo.processInfo.systemUptime)
     var onSelection: (() -> Void)?
     var onDragOffset: ((NSPoint, NSPoint) -> Void)?
@@ -146,6 +156,12 @@ final class PetView: NSView {
     private var pressPoint: NSPoint?
     private var originalWindowOrigin: NSPoint?
     private var didDrag = false
+    private var pressIsStroke = false
+    private var pressCanClick = false
+    private var stroke = DogStrokeGesture()
+    private var petExpression = DogPetExpression()
+    private var lastStrokeEffect: TimeInterval = -.infinity
+    private var lastStrokeBounce: TimeInterval = -.infinity
     private var reducedMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
@@ -167,7 +183,10 @@ final class PetView: NSView {
     override func keyDown(with event: NSEvent) {
         guard isRotationSelected, window?.firstResponder === self else { super.keyDown(with: event); return }
         if DogRotationKey.matches(event) {
-            if !event.isARepeat { onRotationRequest?() }
+            if !event.isARepeat {
+                cancelStroke()
+                onRotationRequest?()
+            }
         } else if event.charactersIgnoringModifiers == "\u{1b}" {
             onCancelSelection?()
         } else { super.keyDown(with: event) }
@@ -185,6 +204,23 @@ final class PetView: NSView {
     }
 
     private var canonicalSize: NSSize { turnPresentation?.canonicalSize ?? orientation.rotatedSize(bounds.size) }
+    /// Stable motion envelope: the hint must not bob along with breathing.
+    var interactionHintFrame: NSRect? {
+        guard let window else { return nil }
+        let local: NSRect
+        if topbarHeight != nil {
+            let layout = DogTopbarRenderer.layout(size: bounds.size, scale: topbarScale)
+            let transform = CGAffineTransform(translationX: layout.offset.x, y: layout.offset.y)
+                .scaledBy(x: layout.scale, y: layout.scale)
+            local = DogRenderer.interactionHintBounds(size: DogRenderer.canvas)
+                .applying(transform).intersection(topbarVisibleBounds)
+        } else {
+            local = DogRenderer.interactionHintBounds(size: canonicalSize).applying(dogTransform)
+                .intersection(bounds)
+        }
+        guard !local.isNull, !local.isEmpty else { return nil }
+        return window.convertToScreen(convert(local, to: nil))
+    }
     var desktopDockingFrame: NSRect? {
         guard topbarHeight == nil, let window else { return nil }
         let head = DogRenderer.headBounds(size: canonicalSize, pose: motion.pose(now: now, reducedMotion: reducedMotion))
@@ -207,18 +243,18 @@ final class PetView: NSView {
         return containsInteraction(p) ? self : nil
     }
 
-    func containsInteraction(_ p: NSPoint) -> Bool {
+    func containsInteraction(_ p: NSPoint, includesBaseline: Bool = true) -> Bool {
         guard bounds.contains(p) else { return false }
         if topbarHeight != nil, !topbarVisibleBounds.contains(p) { return false }
         let time = now
         let pose = motion.pose(now: time, reducedMotion: reducedMotion)
         let tailPose = tail.pose(now: time, reducedMotion: reducedMotion)
         if topbarHeight != nil {
-            return DogTopbarRenderer.contains(p, size: bounds.size, pose: pose, tail: tailPose, tailSize: tailSize, scale: topbarScale)
+            return DogTopbarRenderer.contains(p, size: bounds.size, pose: pose, tail: tailPose, tailSize: tailSize, scale: topbarScale, includesBaseline: includesBaseline)
         }
         let local = p.applying(dogTransform.inverted())
         return DogRenderer.contains(local, size: canonicalSize, pose: pose,
-                                    angle: tailPose.angle, bend: tailPose.bend, tailSize: tailSize)
+                                    angle: tailPose.angle, bend: tailPose.bend, tailSize: tailSize, includesBaseline: includesBaseline)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -232,12 +268,14 @@ final class PetView: NSView {
         if topbarHeight != nil {
             context.clip(to: topbarVisibleBounds)
             DogTopbarRenderer.draw(in: context, size: bounds.size, pose: pose, tail: tailPose,
-                blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize, scale: topbarScale)
+                blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize, scale: topbarScale,
+                petting: petExpression.value(now: now))
             return
         }
         DogRenderer.draw(in: context, size: canonicalSize, pose: pose,
             angle: tailPose.angle, bend: tailPose.bend,
-            blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize)
+            blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize,
+            petting: petExpression.value(now: now))
     }
 
     // With a baseline on the menu edge, a large dog can extend above this
@@ -257,14 +295,18 @@ final class PetView: NSView {
     }
 
     func stop() {
-        onEffectsCleared?()
         running = false
+        cancelPointerInteraction()
+        petExpression.cancel()
+        onEffectsCleared?()
         timer?.invalidate()
         timer = nil
         interval = 0
     }
 
     func rest() {
+        cancelPointerInteraction()
+        petExpression.cancel()
         onEffectsCleared?()
         motion.sleep(now: now)
         tail.settle(now: now)
@@ -285,7 +327,7 @@ final class PetView: NSView {
     func pet(at screenPoint: NSPoint? = nil) {
         let time = now
         motion.click(now: time)
-        tail.wag(now: now)
+        tail.wag(now: time)
         if let window {
             let point = screenPoint ?? window.convertPoint(toScreen:
                 convert(topbarHeight == nil ? DogTurnPresentation.pivot(in: canonicalSize).applying(dogTransform)
@@ -301,6 +343,56 @@ final class PetView: NSView {
         tail.wag(now: now)
         needsDisplay = true
         schedule(interval: reducedMotion ? 1 / 10 : 1 / 60)
+    }
+
+    private func strokePet(at screenPoint: NSPoint, now time: TimeInterval) {
+        let bounces = time - lastStrokeBounce >= 0.65
+        motion.stroke(now: time, bounces: bounces)
+        if bounces { lastStrokeBounce = time }
+        petExpression.touch(now: time)
+        tail.wag(now: time)
+        if time - lastStrokeEffect >= 0.65 {
+            lastStrokeEffect = time
+            if onPet?(screenPoint) == true { heartAnimationUntil = time + ClickHeart.lifetime }
+        }
+        needsDisplay = true
+        schedule(interval: reducedMotion ? 1 / 10 : 1 / 60)
+    }
+
+    func updateInteractionHelp() {
+        if positionLocked {
+            setAccessibilityHelp("按住小狗来回摸摸；快速双击并按住第二下可拖动，松手自动恢复摸摸。")
+        } else if topbarHeight != nil {
+            setAccessibilityHelp("左右拖动调整顶栏位置，向下拖出回到桌面；右键可以调整大小或重置位置。")
+        } else {
+            setAccessibilityHelp("点击摸摸并选中，按 R 平滑旋转 90°；拖动可以移动。右键可锁定位置后按住来回摸摸。")
+        }
+    }
+
+    func cancelStroke() {
+        if pressIsStroke { cancelPointerInteraction() }
+    }
+
+    func cancelPointerInteraction() {
+        let captured = hasPointerCapture
+        let wasDragging = didDrag
+        pressPoint = nil
+        originalWindowOrigin = nil
+        didDrag = false
+        pressIsStroke = false
+        pressCanClick = false
+        stroke.cancel()
+        if wasDragging { motion.cancelDrag(now: now); onPositionChanged?() }
+        if captured { onPointerRelease?(); onInteractionFrame?() }
+    }
+
+    @objc private func cancelPointerForWindow(_ notification: Notification) {
+        cancelPointerInteraction()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        cancelPointerInteraction()
+        return super.menu(for: event)
     }
 
     func keyboardPress() {
@@ -335,28 +427,47 @@ final class PetView: NSView {
     private func tick() {
         guard window?.isVisible == true, window?.isMiniaturized == false else { stop(); return }
         motion.advance(now: now)
+        if motion.sleepStarted != nil { petExpression.cancel() }
         onInteractionFrame?()
         onEffectsFrame?()
         needsDisplay = true
         let quick = now < heartAnimationUntil || turnPresentation != nil || motion.isAnimatingQuickly(now: now)
-            || (tail.isMoving(now: now) || DogMotion.blink(now: now) > 0)
+            || (tail.isMoving(now: now) || petExpression.isMoving(now: now) || DogMotion.blink(now: now) > 0)
         let rate = reducedMotion ? 10.0 : (quick ? 60.0 : 30.0)
         schedule(interval: 1 / rate)
     }
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
+        cancelPointerInteraction()
         onSelection?()
         onPointerPress?()
         pressPoint = window.convertPoint(toScreen: event.locationInWindow)
         originalWindowOrigin = window.frame.origin
         didDrag = false
+        // AppKit supplies the user's system double-click timing. The override
+        // belongs only to this press; it never changes the saved lock setting.
+        pressIsStroke = positionLocked && event.clickCount < 2
+        pressCanClick = !positionLocked
+            || containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false)
+        if pressIsStroke, let pressPoint {
+            stroke.begin(pressPoint, now: now,
+                inside: containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false))
+        }
         onInteractionFrame?()
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let pressPoint, let origin = originalWindowOrigin, let window else { return }
         let current = window.convertPoint(toScreen: event.locationInWindow)
+        if pressIsStroke {
+            let time = now
+            if stroke.move(current, now: time,
+                inside: containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false)) {
+                strokePet(at: current, now: time)
+            }
+            return
+        }
         let dx = current.x - pressPoint.x
         let dy = current.y - pressPoint.y
         guard didDrag || hypot(dx, dy) > 4 else { return }
@@ -376,17 +487,29 @@ final class PetView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         guard pressPoint != nil else { return }
+        if pressIsStroke {
+            let point = window?.convertPoint(toScreen: event.locationInWindow)
+            let clicks = point.map {
+                stroke.finish($0, inside: containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false))
+            } ?? false
+            cancelPointerInteraction()
+            if clicks { pet(at: point) }
+            needsDisplay = true
+            return
+        }
         // Capture the event's screen point before callbacks can move the window.
         let droppedAt = didDrag ? window?.convertPoint(toScreen: event.locationInWindow) : nil
         if didDrag {
             motion.endDrag(now: now)
             onPositionChanged?()
-        } else {
+        } else if pressCanClick && (!positionLocked
+            || containsInteraction(convert(event.locationInWindow, from: nil), includesBaseline: false)) {
             pet(at: window?.convertPoint(toScreen: event.locationInWindow))
         }
         pressPoint = nil
         originalWindowOrigin = nil
         didDrag = false
+        pressCanClick = false
         if let droppedAt { onDragEnded?(droppedAt) }
         onPointerRelease?()
         onInteractionFrame?()
@@ -401,6 +524,10 @@ final class PetView: NSView {
     }
 
     override func viewWillMove(toWindow newWindow: NSWindow?) {
+        for name in [NSWindow.didResignKeyNotification, NSWindow.willCloseNotification, NSWindow.didMiniaturizeNotification] {
+            if let window { NotificationCenter.default.removeObserver(self, name: name, object: window) }
+            if let newWindow { NotificationCenter.default.addObserver(self, selector: #selector(cancelPointerForWindow(_:)), name: name, object: newWindow) }
+        }
         if newWindow == nil { stop() }
         super.viewWillMove(toWindow: newWindow)
     }

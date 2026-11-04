@@ -62,6 +62,14 @@ struct PetMotion {
     /// Global keyboard and pointer activity wake quietly and postpone the next nap.
     mutating func inputActivity(now: TimeInterval) { wake(now: now) }
 
+    /// A local stroke warms the cheeks without restarting a full click bounce.
+    mutating func stroke(now: TimeInterval, bounces: Bool) {
+        wake(now: now)
+        if bounces { duang.kick(now: now, strength: 0.22) }
+        reactionStarted = now
+        blush.warm(now: now)
+    }
+
     mutating func beginDrag(now: TimeInterval) {
         wake(now: now)
         isDragging = true
@@ -75,6 +83,13 @@ struct PetMotion {
         wake(now: now)
         landingStarted = now
         duang.kick(now: now, strength: 1)
+    }
+
+    mutating func cancelDrag(now: TimeInterval) {
+        isDragging = false
+        landingStarted = nil
+        duang.cancel()
+        wake(now: now)
     }
 
     func pose(now: TimeInterval, reducedMotion: Bool = false) -> PetPose {

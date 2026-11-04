@@ -328,6 +328,7 @@ final class TopbarTests: XCTestCase, @unchecked Sendable {
             let panel = PetPanel(contentRect: CGRect(x: 500, y: 500, width: 148, height: 100),
                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             let pet = PetView(frame: CGRect(x: 0, y: 0, width: 148, height: 100))
+            pet.positionLocked = false
             panel.contentView = pet
             var drops: [NSPoint] = []
             var phases: [String] = []
@@ -368,6 +369,7 @@ final class TopbarTests: XCTestCase, @unchecked Sendable {
             let panel = PetPanel(contentRect: CGRect(x: 500, y: 500, width: 148, height: 38),
                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             let pet = PetView(frame: CGRect(x: 0, y: 0, width: 148, height: 38))
+            pet.positionLocked = false
             pet.topbarHeight = 38
             panel.contentView = pet
             var reportedPoint: NSPoint?, reportedOffset: NSPoint?

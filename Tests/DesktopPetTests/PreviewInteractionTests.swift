@@ -12,6 +12,7 @@ final class PreviewInteractionTests: XCTestCase, @unchecked Sendable {
             window.isReleasedWhenClosed = false
             let canvas = DogPreviewCanvas(frame: NSRect(x: 0, y: 0, width: 366, height: 204),
                                           scale: 0.62, name: "测试小狗", clock: { time })
+            canvas.pet.positionLocked = false
             window.contentView = canvas
             let originalWindow = window.frame
             let originalDog = canvas.pet.frame
@@ -47,6 +48,7 @@ final class PreviewInteractionTests: XCTestCase, @unchecked Sendable {
             window.isReleasedWhenClosed = false
             let canvas = DogPreviewCanvas(frame: NSRect(x: 0, y: 0, width: 180, height: 204),
                                           scale: 0.5, name: "测试小狗", clock: { time })
+            canvas.pet.positionLocked = false
             window.contentView = canvas
             let press = canvas.pet.convert(NSPoint(x: 52, y: 20), to: nil)
             canvas.pet.mouseDown(with: try mouse(.leftMouseDown, at: press, in: window))
@@ -166,6 +168,7 @@ final class PreviewInteractionTests: XCTestCase, @unchecked Sendable {
             window.isReleasedWhenClosed = false
             let canvas = DogPreviewCanvas(frame: NSRect(x: 0, y: 0, width: 366, height: 204),
                                           scale: 0.62, name: "测试小狗", clock: { time })
+            canvas.pet.positionLocked = false
             window.contentView = canvas
             let originalWindow = window.frame
             let press = canvas.pet.convert(NSPoint(x: 60, y: 25), to: nil)

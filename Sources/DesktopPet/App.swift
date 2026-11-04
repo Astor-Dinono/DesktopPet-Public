@@ -129,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var directionItems: [NSMenuItem] = []
     private var effectChoices: InteractionEffectMenuView?
     private var tailSize = DogTailSize(storedValue: UserDefaults.standard.object(forKey: DogTailSize.preferenceKey) as? Int)
+    private var positionLockItem: NSMenuItem!
     private var topbarEnabled = false
     private var topbarHidden = false
     private var topbarItem: NSMenuItem!
@@ -153,6 +154,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var suspended = false
     private var dogPreview: DogPreviewController?
     private let clickHearts = ClickHeartOverlay()
+    private let interactionHint = DogInteractionHint()
+    private var openHintMenus = Set<ObjectIdentifier>()
     private let keyCounts = KeyCountStore()
     private let keyboard = InputMonitor()
     private let updater = DogUpdater()
@@ -185,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pet = PetView(frame: NSRect(origin: .zero, size: size))
         pet.setAutoNap(autoNap)
         pet.tailSize = tailSize
+        pet.positionLocked = UserDefaults.standard.object(forKey: PetView.positionLockKey) as? Bool ?? true
         pet.onDragEnded = { [weak self] in self?.finishDesktopDrag(at: $0) }
         companion = DogCompanionView(pet: pet, scale: scale)
         companion.orientation = orientation
@@ -202,10 +206,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         pet.onCancelSelection = { [weak self] in self?.panel.clearRotationSelection() }
         pet.onDragOffset = { [weak self] offset, point in self?.dragDesktop(to: offset, pointer: point) }
-        pet.setAccessibilityHelp("点击摸摸并选中，按 R 平滑旋转 90°；拖到屏幕顶部附近松手可进入顶栏，往下拖出回到桌面。")
-        pet.onInteractionFrame = { [weak self] in self?.advanceTurn(); self?.panel.refreshPointerRouting() }
+        pet.updateInteractionHelp()
+        pet.onInteractionFrame = { [weak self] in
+            self?.advanceTurn()
+            self?.panel.refreshPointerRouting()
+            self?.updateInteractionHint()
+        }
         pet.onPointerPress = { [weak self] in
             guard let self else { return }
+            self.interactionHint.hide()
             self.previousDragOffset = .zero
             self.dragStartedInTopbar = self.topbarEnabled
             self.desktopPlacementBeforeDrag = self.topbarEnabled ? nil : self.currentDesktopPlacement
@@ -264,6 +273,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.screensDidSleepNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.screensDidWakeNotification, object: nil)
+        // Defer once so restored topbar/desktop placement is settled first.
+        interactionHint.requestAutomatically()
+        DispatchQueue.main.async { [weak self] in self?.updateInteractionHint() }
     }
 
     private func createMenu() {
@@ -275,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let interactions = NSMenu()
         interactions.delegate = self
         sleepItem = item("打个盹", action: #selector(toggleSleep))
+        interactions.addItem(item("摸摸它", action: #selector(petDog)))
         interactions.addItem(sleepItem)
         interactions.addItem(item("摇摇尾巴", action: #selector(wag)))
         let effects = NSMenu()
@@ -308,6 +321,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoNapItem.submenu = naps
 
         let appearance = NSMenu()
+        positionLockItem = item("锁定位置", action: #selector(togglePositionLock))
+        positionLockItem.state = pet.positionLocked ? .on : .off
+        positionLockItem.toolTip = "按住摸摸；双击并按住第二下可临时拖动，松手自动恢复"
+        appearance.addItem(positionLockItem)
+        appearance.addItem(.separator())
         let sizes = NSMenu()
         for option in DogSize.allCases {
             let entry = item(option.title, action: #selector(changeSize(_:)))
@@ -383,6 +401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         more.addItem(item("检查更新…", action: #selector(checkForUpdates(_:))))
         more.addItem(.separator())
         more.addItem(item("互动预览…", action: #selector(showDogPreview)))
+        more.addItem(item("操作提示…", action: #selector(showInteractionHint)))
         more.addItem(item("隐私说明…", action: #selector(showPrivacy)))
         let moreItem = NSMenuItem(title: "更多", action: nil, keyEquivalent: "")
         moreItem.submenu = more
@@ -400,6 +419,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func toggleVisibility() {
+        interactionHint.hide()
+        defer { updateInteractionHint() }
         finishTurn()
         if topbarEnabled {
             topbarHidden.toggle()
@@ -437,6 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func resetTopbarPosition() {
+        interactionHint.hide()
         guard topbarEnabled else { return }
         topbarPosition = nil
         DogTopbarPosition.clear(from: .standard)
@@ -448,6 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setTopbarEnabled(_ enabled: Bool, restoringDesktop placement: DesktopPlacement? = nil) {
         guard enabled != topbarEnabled else { return }
+        interactionHint.hide()
         finishTurn()
         if let placement { saveDesktopPlacement(placement) } else { savePosition() }
         panel.clearRotationSelection()
@@ -510,6 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 drawingSize: topbarDrawingSize(on: screen), attachmentY: screen.visibleFrame.maxY)
         } else { frame = nil }
         guard let frame else {
+            interactionHint.hide()
             panel.stopPointerRouting(); panel.orderOut(nil); pet.stop()
             return
         }
@@ -539,6 +563,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func wag() { pet.wag() }
+    @objc private func petDog() {
+        if !panel.isVisible { toggleVisibility() }
+        pet.pet()
+    }
+
+    @objc private func togglePositionLock() {
+        pet.positionLocked.toggle()
+        positionLockItem.state = pet.positionLocked ? .on : .off
+        UserDefaults.standard.set(pet.positionLocked, forKey: PetView.positionLockKey)
+        dogPreview?.setPositionLocked(pet.positionLocked)
+        panel.refreshPointerRouting()
+    }
 
     @objc private func checkForUpdates(_ sender: Any?) { updater.checkForUpdates(sender) }
 
@@ -553,11 +589,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuWillOpen(_ menu: NSMenu) {
+        openHintMenus.insert(ObjectIdentifier(menu))
+        interactionHint.hide()
+        pet.cancelPointerInteraction()
         effectChoices?.refresh()
         sleepItem.title = pet.motion.sleepStarted == nil ? "打个盹" : "醒醒"
         keyCounts.refreshDay()
         keyboard.refresh()
         updateCountMenu()
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        openHintMenus.remove(ObjectIdentifier(menu))
+        DispatchQueue.main.async { [weak self] in self?.updateInteractionHint() }
+    }
+
+    @objc private func showInteractionHint() {
+        interactionHint.showManually()
+        if !panel.isVisible { toggleVisibility() }
+        updateInteractionHint()
+    }
+
+    private func updateInteractionHint() {
+        guard interactionHint.isRequested, let panel, let pet, let companion else { return }
+        guard !suspended, openHintMenus.isEmpty, panel.isVisible, !panel.isMiniaturized,
+              !pet.hasPointerCapture, turning == nil else { interactionHint.hide(); return }
+        guard let screen = dogScreen ?? panel.screen ?? NSScreen.main,
+              let fullAnchor = pet.interactionHintFrame else { interactionHint.hide(); return }
+        let anchor = fullAnchor.intersection(screen.frame)
+        guard !anchor.isNull, !anchor.isEmpty else { interactionHint.hide(); return }
+        // Reserve the counter's potential area even while its hover fade is hidden,
+        // so the hint never jumps or covers it when the pointer approaches.
+        let obstacle = topbarEnabled ? nil : panel.convertToScreen(companion.convert(companion.badgeFrame, to: nil))
+        interactionHint.update(anchor: anchor, obstacle: obstacle, screen: screen.visibleFrame,
+            visible: true, level: panel.level, positionLocked: pet.positionLocked, owner: panel)
     }
 
     private func updateCountMenu() {
@@ -799,8 +864,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func screenChanged() { finishTurn(); keepOnScreen(); savePosition() }
     @objc private func willSleep() {
-        finishTurn()
         suspended = true
+        interactionHint.hide()
+        finishTurn()
         panel.stopPointerRouting()
         pet.stop()
         keyboard.suspend()
@@ -1001,6 +1067,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quit() { NSApp.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) {
+        suspended = true
+        interactionHint.hide()
         keyboard.stop()
         clickHearts.clear()
         panel?.stopPointerRouting()

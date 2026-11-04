@@ -48,16 +48,18 @@ enum DogTopbarRenderer {
     }
 
     static func contains(_ point: CGPoint, size: CGSize, pose: PetPose,
-                         tail: TailPose, tailSize: DogTailSize, scale: Double = tinyScale) -> Bool {
+                         tail: TailPose, tailSize: DogTailSize, scale: Double = tinyScale,
+                         includesBaseline: Bool = true) -> Bool {
         let layout = layout(size: size, scale: scale)
         let local = CGPoint(x: (point.x - layout.offset.x) / layout.scale,
                             y: (point.y - layout.offset.y) / layout.scale)
         return DogRenderer.contains(local, size: DogRenderer.canvas, pose: pose,
-            angle: tail.angle, bend: tail.bend, tailSize: tailSize)
+            angle: tail.angle, bend: tail.bend, tailSize: tailSize, includesBaseline: includesBaseline)
     }
 
     static func draw(in context: CGContext, size: CGSize, pose: PetPose,
-                     tail: TailPose, blink: Double, tailSize: DogTailSize, scale: Double = tinyScale) {
+                     tail: TailPose, blink: Double, tailSize: DogTailSize, scale: Double = tinyScale,
+                     petting: Double = 0) {
         let layout = layout(size: size, scale: scale)
         context.saveGState()
         defer { context.restoreGState() }
@@ -66,6 +68,6 @@ enum DogTopbarRenderer {
         var originalPose = pose
         originalPose.sleepLetters = 0 // Keep letters out of the narrow menu strip.
         DogRenderer.draw(in: context, size: DogRenderer.canvas, pose: originalPose,
-            angle: tail.angle, bend: tail.bend, blink: blink, tailSize: tailSize)
+            angle: tail.angle, bend: tail.bend, blink: blink, tailSize: tailSize, petting: petting)
     }
 }
