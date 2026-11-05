@@ -601,7 +601,7 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
         func outsidePoint(_ target: OutsideTarget) -> NSPoint {
             switch target {
             case .transparent: NSPoint(x: 3, y: pet.bounds.maxY - 3)
-            case .baseline: NSPoint(x: 3, y: 1 + DogRenderer.baselineY * scale)
+            case .baseline: NSPoint(x: DogRenderer.baselineRange.lowerBound * scale + 1, y: 1 + DogRenderer.baselineY * scale)
             case .counter: pet.convert(NSPoint(x: companion.badgeFrame.midX, y: companion.badgeFrame.midY), from: companion)
             }
         }

@@ -17,18 +17,19 @@ import base64
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0-b11'
+VERSION = '0.1.0-b12'
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--zig', default=os.environ.get('ZIG', 'zig'))
     parser.add_argument('--winsparkle-dir',type=Path,default=ROOT/'build/windows-deps/WinSparkle-0.9.4/WinSparkle-0.9.4')
+    parser.add_argument('--output-dir',type=Path,default=ROOT/'build/windows')
     args = parser.parse_args()
     zig = str(Path(shutil.which(args.zig) or args.zig).resolve())
     version = subprocess.check_output([zig, 'version'], text=True).strip()
     if version != '0.16.0':
         raise SystemExit('This build is pinned to Zig 0.16.0, found '+version)
-    out = ROOT/'build'/'windows'
+    out = args.output_dir.resolve()
     package = out/'DesktopPet-Windows'
     package.mkdir(parents=True, exist_ok=True)
     dependency=json.loads((ROOT/'windows/vendor/winsparkle/dependency.json').read_text())

@@ -90,7 +90,7 @@ final class PettingExpressionTests: XCTestCase, @unchecked Sendable {
 
     func testPettingHitCanExcludeExtendedBaselineWithoutChangingDefault() async {
         await MainActor.run {
-            let edge = NSPoint(x: 2, y: DogRenderer.baselineY + 1)
+            let edge = NSPoint(x: DogRenderer.baselineRange.lowerBound + 1, y: DogRenderer.baselineY + 1)
             XCTAssertTrue(DogRenderer.contains(edge, size: DogRenderer.canvas))
             XCTAssertFalse(DogRenderer.contains(edge, size: DogRenderer.canvas, includesBaseline: false))
             let head = NSPoint(x: 100, y: 40)

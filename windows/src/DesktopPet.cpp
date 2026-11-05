@@ -103,7 +103,7 @@ struct App {
     dog::ContextMenu contextMenu;dog::HeldKeys heldKeys;
     dog::StrokeGesture stroke;dog::HoverStrokeGesture hoverStroke;dog::PetExpression petExpression;
     dog::OperationHint operationHint;dog::OperationHintState hintState;
-    GraphicsPath petHitPath{FillModeWinding},petHitClip;bool petHitReady=false,pressIsStroke=false,pressOnPet=false;
+    GraphicsPath petHitPath{FillModeWinding},petHitClip,earFill{FillModeWinding};bool petHitReady=false,pressIsStroke=false,pressOnPet=false;
     double lastStrokeEffect=-100,lastStrokeDuang=-100;
     inline static std::atomic<HWND> callbackWindow{nullptr};bool readySent=false;
     dog::Fade countFade;bool resumeTurn=false;double resumeAngle=0;
@@ -111,8 +111,15 @@ struct App {
     dog::Point center;double angle=0,dpi=1,lastActivity=0,nextFrame=0,lastFrame=-100;bool turning=false,visible=true,suspended=false,locked=false,reduced=false,hover=false,selected=false,pressed=false,dragging=false,inputActive=false,dirty=false,menuOpen=false;
     POINT pressPoint{};dog::Point pressCenter;int radius=0,fxPad=0;RECT windowRect{};unsigned frameFailures=0;
     // Parsed once, then only transformed at render time.
-    const std::vector<dog::Segment> head=dog::parsePath(dog::headPath),tailShape=dog::parsePath(dog::tailPath),ears=dog::parsePath(dog::earsPath),mouth=dog::parsePath(dog::mouthPath),bubble=dog::parsePath(dog::bubblePath),heart=dog::parsePath(dog::heartPath);
-    App(HINSTANCE value):instance(value){(void)dog::effectArtwork();}
+    const std::vector<dog::Segment> head=dog::parsePath(dog::headPath),tailShape=dog::parsePath(dog::tailPath),mouth=dog::parsePath(dog::mouthPath),bubble=dog::parsePath(dog::bubblePath),heart=dog::parsePath(dog::heartPath);
+    App(HINSTANCE value):instance(value){
+        (void)dog::effectArtwork();dog::Point current{};
+        for(const auto& s:dog::earFillSegments()){
+            if(s.type=='M'){earFill.StartFigure();current=s.points[0];}
+            else if(s.type=='L'){earFill.AddLine(pf(current),pf(s.points[0]));current=s.points[0];}
+            else if(s.type=='Z')earFill.CloseFigure();
+        }
+    }
     double unit()const{return dog::sourceScale*settings.size*dpi;}
     dog::Bounds work()const{
         POINT p{LONG(std::lround(center.x)),LONG(std::lround(center.y))};MONITORINFO info{sizeof(info)};
@@ -160,7 +167,7 @@ struct App {
         if(!petHitReady)return false;
         PointF p(REAL(screenPoint.x-windowRect.left),REAL(screenPoint.y-windowRect.top));
         if(!petHitClip.IsVisible(p))return false;
-        Pen outline(Color(255,0,0,0),REAL(10.37*unit()));
+        Pen outline(Color(255,0,0,0),REAL(dog::outlineWidth*unit()));
         outline.SetLineJoin(LineJoinRound);outline.SetStartCap(LineCapRound);outline.SetEndCap(LineCapRound);
         return petHitPath.IsVisible(p)||petHitPath.IsOutlineVisible(p,&outline);
     }
@@ -319,9 +326,9 @@ struct App {
         auto tailPose=tail.pose(t,reduced);auto tailTransform=[&](dog::Point p){return project(dog::bendTail(p,tailPose,settings.tailSize));};
         Color ink(255,0,0,0),white(255,255,255,255);
         GraphicsPath* hit=&petHitPath;
-        path(g,tailShape,tailTransform,ink,10.37*unit(),white,nullptr,hit);path(g,head,headTransform,ink,10.37*unit(),white,nullptr,hit);
+        path(g,tailShape,tailTransform,ink,dog::outlineWidth*unit(),white,nullptr,hit);path(g,head,headTransform,ink,dog::outlineWidth*unit(),white,nullptr,hit);
         if(wantsHint){
-            RectF shapeBounds,clipBounds;Pen outline(ink,REAL(10.37*unit()));outline.SetLineJoin(LineJoinRound);
+            RectF shapeBounds,clipBounds;Pen outline(ink,REAL(dog::outlineWidth*unit()));outline.SetLineJoin(LineJoinRound);
             petHitPath.GetBounds(&shapeBounds,nullptr,&outline);clip.GetBounds(&clipBounds);
             auto area=work();
             hintPetBounds={std::max({double(shapeBounds.X),double(clipBounds.X),area.left-left})+left,
@@ -329,7 +336,14 @@ struct App {
                 std::min({double(shapeBounds.GetRight()),double(clipBounds.GetRight()),area.right-left})+left,
                 std::min({double(shapeBounds.GetBottom()),double(clipBounds.GetBottom()),area.bottom-top})+top};
         }
-        path(g,ears,headTransform,ink,9.51*unit());path(g,mouth,faceTransform,ink,9.79*unit());ellipse(g,faceTransform,{285,206},17.57,10.95,ink);
+        {
+            // Reuse the source-space GDI+ fill path. Only the affine head pose
+            // changes per frame; no tessellation/path reconstruction here.
+            auto origin=headTransform({0,0});double c=std::cos(angle),sn=std::sin(angle),u=unit();
+            Matrix transform(REAL(c*u*sx),REAL(sn*u*sx),REAL(-sn*u*sy),REAL(c*u*sy),REAL(origin.x),REAL(origin.y));
+            auto saved=g.Save();g.MultiplyTransform(&transform);SolidBrush fill(ink);g.FillPath(&fill,&earFill);g.Restore(saved);
+        }
+        path(g,mouth,faceTransform,ink,dog::mouthWidth*unit());ellipse(g,faceTransform,{285,206},17.57,10.95,ink);
         double closed=1-(1-restPose.closed)*(1-dog::blink(t,reduced));
         double happy=petExpression.value(t)*(1-restPose.closed);if(reduced)happy=happy>.05?1:0;
         auto drawEye=[&](dog::Point p,bool leftEye){
@@ -340,7 +354,7 @@ struct App {
         drawEye({200,198},true);drawEye({398,218},false);
         Color cheek(alpha(blush.value(t)*.36),255,128,153);ellipse(g,faceTransform,{164,228},26.5,9.5,cheek);ellipse(g,faceTransform,{438,244},26.5,9.5,cheek);
         if(restPose.bubble>.001){double growth=(reduced?1:restPose.bubble)*(1+breath*.09);auto bubbleTransform=[&](dog::Point p){return faceTransform({301+p.x*growth/dog::sourceScale,208+p.y*growth/dog::sourceScale});};path(g,bubble,bubbleTransform,Color(alpha(restPose.bubble*.65),102,158,184),.85*settings.size*dpi*(reduced?1:restPose.bubble),Color(alpha(restPose.bubble*.35),209,237,255));static auto glint=dog::parsePath("M9 12 C8 10 9 8 10 8");path(g,glint,bubbleTransform,Color(alpha(restPose.bubble*.8),255,255,255),1.4*settings.size*dpi*(reduced?1:restPose.bubble));}
-        g.ResetClip();Pen baseline(ink,REAL(2.5*settings.size*dpi));baseline.SetStartCap(LineCapRound);baseline.SetEndCap(LineCapRound);g.DrawLine(&baseline,pf(project({0,268})),pf(project({749,268})));
+        g.ResetClip();Pen baseline(ink,REAL(2.5*settings.size*dpi));baseline.SetStartCap(LineCapRound);baseline.SetEndCap(LineCapRound);g.DrawLine(&baseline,pf(project(dog::baselineStart)),pf(project(dog::baselineEnd)));
         bool countWanted=settings.counts.enabled&&(settings.always||hover);countFade.set(countWanted?1:0,t);double countAlpha=reduced?(countWanted?1:0):countFade.value(t);
         if(countAlpha>.001){
             auto value=std::to_wstring(settings.counts.total);double w=std::max(30.0,14.0+value.size()*6.2)*dpi,h=18*dpi;auto b=dog::extent(angle,unit()),area=work();

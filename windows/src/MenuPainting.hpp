@@ -48,7 +48,7 @@ template<class Segments,class Transform> inline void vectorPath(Gdiplus::Graphic
 class MenuPainting {
     Gdiplus::Font normal{L"Segoe UI",13,Gdiplus::FontStyleRegular,Gdiplus::UnitPixel};
     Gdiplus::Font small{L"Segoe UI",11.5f,Gdiplus::FontStyleRegular,Gdiplus::UnitPixel};
-    const std::vector<dog::Segment> head=dog::parsePath(dog::headPath),ears=dog::parsePath(dog::earsPath),mouth=dog::parsePath(dog::mouthPath),tail=dog::parsePath(dog::tailPath);
+    const std::vector<dog::Segment> head=dog::parsePath(dog::headPath),mouth=dog::parsePath(dog::mouthPath),tail=dog::parsePath(dog::tailPath);
     static const std::vector<dog::Segment>& glyph(Icon icon){
         // Small geometric menu symbols, drawn locally. The dog/effects reuse approved artwork.
         static const std::vector<std::vector<dog::Segment>> paths=[](){
@@ -97,7 +97,7 @@ public:
         fillRound(g,{14,12,32,27},9,palette.wag);
         auto transform=[](dog::Point p){return (p-dog::Point{57,50})*.05+dog::Point{16,17};};
         Color ink(0xff262821u),white(0xfffffefbu);
-        vectorPath(g,head,transform,ink,1.08,white);vectorPath(g,ears,transform,ink,1.08);vectorPath(g,mouth,transform,ink,1.08);
+        vectorPath(g,head,transform,ink,1.08,white);vectorPath(g,dog::earFillSegments(),transform,Color(0u),0,ink);vectorPath(g,mouth,transform,ink,1.08*3.1/3.6);
         Gdiplus::SolidBrush brush(ink);
         for(dog::Point p:std::array<dog::Point,2>{{{200,198},{398,218}}}){p=transform(p);g.FillEllipse(&brush,Gdiplus::REAL(p.x-.93),Gdiplus::REAL(p.y-.93),1.86f,1.86f);}
         auto nose=transform({285,206});g.FillEllipse(&brush,Gdiplus::REAL(nose.x-1.08),Gdiplus::REAL(nose.y-.66),2.16f,1.32f);

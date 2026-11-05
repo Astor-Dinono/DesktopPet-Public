@@ -1,6 +1,6 @@
 # Windows 小狗桌宠
 
-Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 11。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
+Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 12。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
 
 ## 构建环境
 
@@ -41,8 +41,8 @@ python3 windows/build.py --zig /path/to/zig --winsparkle-dir /path/to/WinSparkle
 输出在仓库的 build/windows：
 
 1. DesktopPet-Windows：应用、WinSparkle DLL 和随包说明
-2. DesktopPet-Windows-0.1.0-b11-x64.zip：免安装文件归档
-3. DesktopPet-Windows-0.1.0-b11-x64-Setup.exe：当前账户安装程序
+2. DesktopPet-Windows-0.1.0-b12-x64.zip：免安装文件归档
+3. DesktopPet-Windows-0.1.0-b12-x64-Setup.exe：当前账户安装程序
 4. compile.log：构建日志
 
 构建出的安装程序不带 Authenticode 代码签名，也没有官方更新私钥的签名；本地构建成功不代表可直接作为官方在线更新发布。程序包含公开验签公钥，不包含任何私钥。修改版应配置自己的版本、应用身份、更新源及密钥。
@@ -52,7 +52,7 @@ python3 windows/build.py --zig /path/to/zig --winsparkle-dir /path/to/WinSparkle
 1. 构建后可静态检查 PE、图标、权限声明、DLL、归档白名单及安装器嵌入载荷：
 
 ~~~sh
-python3 windows/audit.py build/windows/DesktopPet-Windows-0.1.0-b11-x64.zip
+python3 windows/audit.py build/windows/DesktopPet-Windows-0.1.0-b12-x64.zip
 ~~~
 
 2. tests/CoreTests.cpp、HeldKeysTests.cpp、MenuModelTests.cpp、OperationHintModelTests.cpp、PetExpressionTests.cpp、SqueezeEyesTests.cpp、StrokeGestureTests.cpp 和 HoverStrokeGestureTests.cpp 是无需 Windows UI 的 C++17 测试，可用 Clang 或 Zig 在主机编译运行。例如：

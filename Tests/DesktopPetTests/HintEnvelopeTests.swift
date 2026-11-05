@@ -8,8 +8,8 @@ final class HintEnvelopeTests: XCTestCase, @unchecked Sendable {
             let full = DogRenderer.interactionHintBounds(size: DogRenderer.canvas)
             XCTAssertGreaterThan(full.height, 75)
             XCTAssertLessThan(full.maxY, 110, "The hint should not attach to the 148-point transparent canvas")
-            XCTAssertLessThanOrEqual(full.minX, -1.25)
-            XCTAssertGreaterThanOrEqual(full.maxX, 261.25)
+            XCTAssertGreaterThan(full.minX, 0, "Trimmed baseline must no longer reserve the old left margin")
+            XCTAssertGreaterThanOrEqual(full.maxX, DogRenderer.baselineRange.upperBound + 1.25)
             XCTAssertLessThanOrEqual(full.minY, 1 + DogRenderer.baselineY - 1.25)
 
             // The renderer's +1 point translation does not scale with the dog.

@@ -31,8 +31,9 @@ enum DogTopbarRenderer {
 
     // Preserve exactly the old 148 × 38-point topbar dog's fitted size as a
     // selectable size. This reference never changes with the current display.
-    static let tinyScale: Double = Double(max(0.001, min(0.5,
-        (148 - 4) / DogRenderer.canvas.width, (38 - 1.8 - 0.8) / motionHeight)))
+    // Freeze the original fitted scale: artwork refinements must not silently
+    // resize existing pets or stop recognizing their saved size preference.
+    static let tinyScale: Double = 0.3678859203570799
 
     static func drawingSize(scale: Double, bandHeight: CGFloat) -> CGSize {
         CGSize(width: max(148, DogRenderer.canvas.width * scale + 4),

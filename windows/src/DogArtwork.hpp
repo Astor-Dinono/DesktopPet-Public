@@ -5,9 +5,9 @@
 
 namespace dog {
 // Same editable vector paths as the macOS DogRenderer. No raster pose swaps.
-inline constexpr const char* headPath="M70 284 C57 254 65 211 88 180 C68 174 62 163 64 150 C58 132 62 121 81 112 C91 103 102 102 115 99 C135 87 155 63 170 61 C181 53 185 53 197 58 C208 60 218 72 228 77 C260 64 297 60 330 61 C374 61 410 80 433 93 C451 81 472 78 484 84 C500 87 505 98 516 108 C534 124 555 130 566 141 C575 147 578 152 578 163 C578 175 578 184 573 195 C568 213 563 218 557 219 C545 225 536 219 532 210 C536 231 541 251 543 267 L543 284 Z";
-inline constexpr const char* tailPath="M550 282 C588 248 614 230 628 199 C641 168 640 161 649 165 C659 158 671 167 677 181 C695 207 682 238 668 259 L650 282 Z";
-inline constexpr const char* earsPath="M145 110 C139 145 113 188 88 180 M478 136 C484 160 499 180 518 191 C522 198 525 205 532 210";
+inline constexpr const char* headPath="M 70 284 C 57 254 65 211 88 180 C 69 180 62 165 64 146 C 66 127 68 117 83 111 C 98 105 108 103 115 99 C 136 87 154 67 170 61 C 179 55 188 54 197 58 C 208 60 218 72 228 77 C 260 65 297 60 330 61 C 374 61 410 80 433 93 C 451 83 471 80 484 84 C 497 88 504 98 516 108 C 528 118 552 126 566 141 C 580 156 578 180 570 198 C 562 216 544 226 532 210 C 536 231 541 251 543 267 L 543 284 Z";
+inline constexpr const char* tailPath="M550 282 C588 248 614 230 628 199 C639 176 640 165 650 165 C661 165 671 171 677 181 C695 207 682 238 668 259 L650 282 Z";
+inline constexpr const char* earsPath="M145 110 C139 145 112 180 88 180 M478 136 C486 166 518 193 532 210";
 inline constexpr const char* mouthPath="M255 220 C252 242 272 237 281 225 C291 242 307 246 312 225";
 // Effect paths use canonical points (y-down), matching the Mac's effect canvas.
 inline constexpr const char* bubblePath="M0 0 C6 3 19 3 20 10 C21 14 18 17 13 17 C7 17 4 14 6 10 C6 6 3 3 0 0 Z";
@@ -35,6 +35,40 @@ inline std::vector<Segment> parsePath(const char* text) {
         segments.push_back(s);
     }
     return segments;
+}
+// Source-space shape constants; the stable rotation pivot/placement anchor
+// remain in DogCore. Ear seams are filled ribbons, not stacked round caps.
+inline constexpr double outlineWidth=3.6/sourceScale,mouthWidth=3.1/sourceScale;
+inline constexpr Point baselineStart{30,268},baselineEnd{700,268};
+inline const std::vector<Segment>& earFillSegments(){
+    static const std::vector<Segment> cached=[](){
+        std::vector<Segment> result;result.reserve(550);
+        const std::array<std::array<Point,4>,2> curves{{
+            {{{145,110},{139,145},{112,180},{88,180}}},
+            {{{478,136},{486,166},{518,193},{532,210}}}
+        }};
+        auto add=[&](char type,Point p={}){Segment s{type,{}};s.points[0]=p;result.push_back(s);};
+        for(const auto& c:curves){
+            std::array<Point,129> left{},right{};
+            for(int i=0;i<=128;++i){
+                double t=i/128.0,u=1-t;
+                Point p=c[0]*(u*u*u)+c[1]*(3*u*u*t)+c[2]*(3*u*t*t)+c[3]*(t*t*t);
+                Point tangent=(c[1]-c[0])*(3*u*u)+(c[2]-c[1])*(6*u*t)+(c[3]-c[2])*(3*t*t);
+                double length=std::hypot(tangent.x,tangent.y);
+                Point normal{-tangent.y/length,tangent.x/length};
+                double blend=clamp((t-.58)/.28);blend=blend*blend*(3-2*blend);
+                double radius=(2.85+(3.6-2.85)*blend)/sourceScale/2;
+                left[i]=p+normal*radius;right[i]=p-normal*radius;
+            }
+            add('M',left[0]);for(int i=1;i<=128;++i)add('L',left[i]);
+            for(int i=128;i>=0;--i)add('L',right[i]);
+            double a=std::atan2(left[0].y-c[0].y,left[0].x-c[0].x),r=2.85/sourceScale/2;
+            for(int i=1;i<=16;++i){double angle=a+pi-pi*i/16;add('L',c[0]+Point{r*std::cos(angle),r*std::sin(angle)});}
+            add('Z');
+        }
+        return result;
+    }();
+    return cached;
 }
 enum class TailSize : int { Small=80, Original=100 };
 inline TailSize storedTailSize(int value) { return value==100?TailSize::Original:TailSize::Small; }

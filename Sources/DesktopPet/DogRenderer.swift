@@ -50,21 +50,19 @@ enum DogRenderer {
         let path = NSBezierPath()
         path.move(to: p(70, 284))
         path.curve(to: p(88, 180), controlPoint1: p(57, 254), controlPoint2: p(65, 211))
-        path.curve(to: p(64, 150), controlPoint1: p(68, 174), controlPoint2: p(62, 163))
-        path.curve(to: p(81, 112), controlPoint1: p(58, 132), controlPoint2: p(62, 121))
-        path.curve(to: p(115, 99), controlPoint1: p(91, 103), controlPoint2: p(102, 102))
-        path.curve(to: p(170, 61), controlPoint1: p(135, 87), controlPoint2: p(155, 63))
-        path.curve(to: p(197, 58), controlPoint1: p(181, 53), controlPoint2: p(185, 53))
+        path.curve(to: p(64, 146), controlPoint1: p(69, 180), controlPoint2: p(62, 165))
+        path.curve(to: p(83, 111), controlPoint1: p(66, 127), controlPoint2: p(68, 117))
+        path.curve(to: p(115, 99), controlPoint1: p(98, 105), controlPoint2: p(108, 103))
+        path.curve(to: p(170, 61), controlPoint1: p(136, 87), controlPoint2: p(154, 67))
+        path.curve(to: p(197, 58), controlPoint1: p(179, 55), controlPoint2: p(188, 54))
         path.curve(to: p(228, 77), controlPoint1: p(208, 60), controlPoint2: p(218, 72))
-        path.curve(to: p(330, 61), controlPoint1: p(260, 64), controlPoint2: p(297, 60))
+        path.curve(to: p(330, 61), controlPoint1: p(260, 65), controlPoint2: p(297, 60))
         path.curve(to: p(433, 93), controlPoint1: p(374, 61), controlPoint2: p(410, 80))
-        path.curve(to: p(484, 84), controlPoint1: p(451, 81), controlPoint2: p(472, 78))
-        path.curve(to: p(516, 108), controlPoint1: p(500, 87), controlPoint2: p(505, 98))
-        path.curve(to: p(566, 141), controlPoint1: p(534, 124), controlPoint2: p(555, 130))
-        path.curve(to: p(578, 163), controlPoint1: p(575, 147), controlPoint2: p(578, 152))
-        path.curve(to: p(573, 195), controlPoint1: p(578, 175), controlPoint2: p(578, 184))
-        path.curve(to: p(557, 219), controlPoint1: p(568, 213), controlPoint2: p(563, 218))
-        path.curve(to: p(532, 210), controlPoint1: p(545, 225), controlPoint2: p(536, 219))
+        path.curve(to: p(484, 84), controlPoint1: p(451, 83), controlPoint2: p(471, 80))
+        path.curve(to: p(516, 108), controlPoint1: p(497, 88), controlPoint2: p(504, 98))
+        path.curve(to: p(566, 141), controlPoint1: p(528, 118), controlPoint2: p(552, 126))
+        path.curve(to: p(570, 198), controlPoint1: p(580, 156), controlPoint2: p(578, 180))
+        path.curve(to: p(532, 210), controlPoint1: p(562, 216), controlPoint2: p(544, 226))
         path.curve(to: p(543, 267), controlPoint1: p(536, 231), controlPoint2: p(541, 251))
         path.line(to: p(543, 284))
         path.close()
@@ -86,8 +84,8 @@ enum DogRenderer {
         let path = NSBezierPath()
         path.move(to: q(550, 282))
         path.curve(to: q(628, 199), controlPoint1: q(588, 248), controlPoint2: q(614, 230))
-        path.curve(to: q(649, 165), controlPoint1: q(641, 168), controlPoint2: q(640, 161))
-        path.curve(to: q(677, 181), controlPoint1: q(659, 158), controlPoint2: q(671, 167))
+        path.curve(to: q(650, 165), controlPoint1: q(639, 176), controlPoint2: q(640, 165))
+        path.curve(to: q(677, 181), controlPoint1: q(661, 165), controlPoint2: q(671, 171))
         path.curve(to: q(668, 259), controlPoint1: q(695, 207), controlPoint2: q(682, 238))
         path.line(to: q(650, 282))
         path.close()
@@ -96,15 +94,51 @@ enum DogRenderer {
 
     static let headOutline = headPath()
 
+    /// Filled, variable-width creases are sampled once in source space. They
+    /// meet the outer rim at its full width without stacking unequal round caps.
     static let earLines: NSBezierPath = {
         let ears = NSBezierPath()
-        ears.move(to: p(145, 110))
-        ears.curve(to: p(88, 180), controlPoint1: p(139, 145), controlPoint2: p(113, 188))
-        ears.move(to: p(478, 136))
-        ears.curve(to: p(518, 191), controlPoint1: p(484, 160), controlPoint2: p(499, 180))
-        ears.curve(to: p(532, 210), controlPoint1: p(522, 198), controlPoint2: p(525, 205))
+        for points in [[NSPoint(x: 145, y: 110), NSPoint(x: 139, y: 145),
+                        NSPoint(x: 112, y: 180), NSPoint(x: 88, y: 180)],
+                       [NSPoint(x: 478, y: 136), NSPoint(x: 486, y: 166),
+                        NSPoint(x: 518, y: 193), NSPoint(x: 532, y: 210)]] {
+            var left: [NSPoint] = [], right: [NSPoint] = []
+            for k in 0...128 {
+                let t = Double(k) / 128, u = 1 - t
+                let center = NSPoint(
+                    x: u*u*u*points[0].x + 3*u*u*t*points[1].x + 3*u*t*t*points[2].x + t*t*t*points[3].x,
+                    y: u*u*u*points[0].y + 3*u*u*t*points[1].y + 3*u*t*t*points[2].y + t*t*t*points[3].y)
+                let dx = 3*u*u*(points[1].x-points[0].x) + 6*u*t*(points[2].x-points[1].x) + 3*t*t*(points[3].x-points[2].x)
+                let dy = 3*u*u*(points[1].y-points[0].y) + 6*u*t*(points[2].y-points[1].y) + 3*t*t*(points[3].y-points[2].y)
+                let length = hypot(dx, dy)
+                let blend = min(1, max(0, (t - 0.58) / 0.28))
+                let radius = (2.85 + 0.75 * blend * blend * (3 - 2 * blend)) / sourceScale / 2
+                left.append(NSPoint(x: center.x - dy / length * radius, y: center.y + dx / length * radius))
+                right.append(NSPoint(x: center.x + dy / length * radius, y: center.y - dx / length * radius))
+            }
+            ears.move(to: p(left[0].x, left[0].y))
+            for point in left.dropFirst() + right.reversed() { ears.line(to: p(point.x, point.y)) }
+            let start = points[0]
+            let angle = atan2(left[0].y - start.y, left[0].x - start.x)
+            let radius = 2.85 / sourceScale / 2
+            for k in 1...16 {
+                let a = angle + .pi - .pi * Double(k) / 16
+                ears.line(to: p(start.x + radius * cos(a), start.y + radius * sin(a)))
+            }
+            ears.close()
+        }
         return ears
     }()
+
+    static let baselineRange = (30 * sourceScale)...(700 * sourceScale)
+    static let baselineOutline: NSBezierPath = {
+        let edge = NSBezierPath()
+        edge.move(to: NSPoint(x: baselineRange.lowerBound, y: baselineY))
+        edge.line(to: NSPoint(x: baselineRange.upperBound, y: baselineY))
+        return edge
+    }()
+    private static let baselineInk = baselineOutline.cgPath.copy(strokingWithWidth: 2.5,
+        lineCap: .round, lineJoin: .round, miterLimit: 10)
 
     static let mouthOutline: NSBezierPath = {
         let mouth = NSBezierPath()
@@ -137,7 +171,7 @@ enum DogRenderer {
         let local = NSPoint(x: (point.x - (size.width - canvas.width * scale) / 2) / scale,
                             y: (point.y - 1) / scale)
         // Include the visible ink, but not the transparent margins or floating effects.
-        if includesBaseline, (0...canvas.width).contains(local.x), abs(local.y - baselineY) <= 1.25 { return true }
+        if includesBaseline, baselineInk.contains(local) { return true }
         guard local.y >= baselineY else { return false }
         func hits(_ path: NSBezierPath, _ transform: CGAffineTransform) -> Bool {
             let p = local.applying(transform.inverted())
@@ -187,8 +221,7 @@ enum DogRenderer {
             hypot(bentTail.maxX - root.x, bentTail.maxY - root.y)].max()! + 1.8
         let tail = CGRect(x: root.x - radius, y: root.y - radius,
                           width: radius * 2, height: radius * 2).intersection(clip)
-        let baseline = CGRect(x: -1.25, y: baselineY - 1.25,
-                              width: canvas.width + 2.5, height: 2.5)
+        let baseline = baselineInk.boundingBoxOfPath
         // One canonical point for edge antialiasing; not the 148-point canvas.
         return head.union(tail).union(baseline).insetBy(dx: -1, dy: -1)
     }()
@@ -230,8 +263,8 @@ enum DogRenderer {
         NSColor.white.setFill(); head.fill()
         stroke(head, width: 3.6)
 
-        let ears = Self.earLines
-        stroke(ears, width: 3.3)
+        ink.setFill()
+        earLines.fill()
 
         context.translateBy(x: 0, y: -pose.sleepSettle * 1.1)
         if pose.affection > 0 {
@@ -256,16 +289,13 @@ enum DogRenderer {
         ink.setFill()
         NSBezierPath(ovalIn: NSRect(x: noseCenter.x - 6.1, y: noseCenter.y - 3.8, width: 12.2, height: 7.6)).fill()
         let mouth = Self.mouthOutline
-        stroke(mouth, width: 3.4)
+        stroke(mouth, width: 3.1)
 
         if pose.sleepBubble > 0 { drawBubble(pose, in: context) }
         context.restoreGState()
         context.restoreGState()
 
-        let edge = NSBezierPath()
-        edge.move(to: NSPoint(x: 0, y: baselineY))
-        edge.line(to: NSPoint(x: canvas.width, y: baselineY))
-        stroke(edge, width: 2.5)
+        stroke(baselineOutline, width: 2.5)
 
         context.saveGState()
         context.translateBy(x: -4, y: -70)

@@ -70,7 +70,17 @@ int main(){
         // The known samples lie well inside the original head and tail shapes.
         for(double dpi:{1.0,1.25,1.5,2.0})for(int turn=0;turn<4;++turn){
             app.dpi=dpi;app.angle=turn*dog::pi/2;
-            assert(app.draw(0));assert(app.petHitReady);
+            const int earPoints=app.earFill.GetPointCount();assert(earPoints>500);
+            assert(app.draw(0));assert(app.petHitReady);assert(app.earFill.GetPointCount()==earPoints);
+            // The old baseline ends are now genuinely transparent, so the
+            // layered-window alpha hit surface cannot keep an invisible edge.
+            for(auto source:std::array<dog::Point,2>{{{0,268},{749,268}}}){
+                auto screen=projected(app,source);
+                assert(pixelAlpha(app,int(screen.x-app.windowRect.left),int(screen.y-app.windowRect.top))==0);
+                assert(!app.hitsPet(screen));
+            }
+            auto line=projected(app,{35,268});
+            assert(pixelAlpha(app,int(line.x-app.windowRect.left),int(line.y-app.windowRect.top))>0);
             assert(app.hitsPet(projected(app,{305,150})));
             const auto tail=dog::bendTail({650,220},{},app.settings.tailSize);
             assert(app.hitsPet(projected(app,tail)));
