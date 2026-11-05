@@ -5,6 +5,31 @@ import XCTest
 /// Exercises local AppKit event routing only. The panels are never shown and
 /// PetView.start() is deliberately not called: no global input or clock runs.
 final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
+    func testSleepingHoverBlushesWithoutWakingOrEmittingEffectsAndClickStillWakes() async throws {
+        try await MainActor.run {
+            let f = Fixture()
+            defer { f.close() }
+            let now = ProcessInfo.processInfo.systemUptime
+            f.pet.motion.sleep(now: now - 10)
+            let began = f.pet.motion.sleepStarted
+            f.routeHover(at: f.headA, time: 0)
+            f.routeHover(at: f.headA, time: 0.36)
+            f.routeHover(at: f.headB, time: 0.5)
+            XCTAssertEqual(f.pet.motion.sleepStarted, began)
+            let pose = f.pet.motion.pose(now: ProcessInfo.processInfo.systemUptime + 0.6)
+            XCTAssertEqual(pose.sleep, 1)
+            XCTAssertEqual(pose.sleepBubble, 1)
+            XCTAssertGreaterThan(pose.affection, 0)
+            XCTAssertEqual(pose.squash, 0)
+            XCTAssertTrue(f.pets.isEmpty)
+            XCTAssertFalse(f.pet.hasPointerCapture)
+            try f.send(.leftMouseDown, at: f.headA)
+            try f.send(.leftMouseUp, at: f.headA)
+            XCTAssertNil(f.pet.motion.sleepStarted)
+            XCTAssertEqual(f.pets.count, 1)
+        }
+    }
+
     func testPositionIsUnlockedForSinglePressDraggingByDefault() async {
         await MainActor.run {
             XCTAssertFalse(PetView(frame: .zero).positionLocked)
@@ -205,7 +230,11 @@ final class PettingInteractionTests: XCTestCase, @unchecked Sendable {
                 XCTAssertTrue(f.pets.isEmpty)
                 f.pet.updateHover(at: f.headA, pressedButtons: 0, hoverTime: 0.36)
                 f.pet.updateHover(at: f.headB, pressedButtons: 0, hoverTime: 0.5)
-                XCTAssertEqual(f.pets.count, 1, "\(reason)")
+                XCTAssertEqual(f.pets.count, reason == .rest ? 0 : 1, "\(reason)")
+                if reason == .rest {
+                    XCTAssertNotNil(f.pet.motion.sleepStarted)
+                    XCTAssertGreaterThan(f.pet.motion.pose(now: ProcessInfo.processInfo.systemUptime + 0.6).affection, 0)
+                }
                 XCTAssertFalse(f.pet.motion.isDragging)
                 XCTAssertEqual(f.releases, 1)
                 XCTAssertEqual(f.dragOffsets.count, 1)

@@ -40,6 +40,9 @@ bash scripts/build-app.sh
 
 ```sh
 build/DesktopPet.app/Contents/MacOS/DesktopPet --render-dog-previews build/dog-previews
+build/DesktopPet.app/Contents/MacOS/DesktopPet --render-yawn-previews build/yawn-previews
 build/DesktopPet.app/Contents/MacOS/DesktopPet --render-tail-loop build/tail-frames
 build/DesktopPet.app/Contents/MacOS/DesktopPet --render-click-heart-previews build/heart-previews
 ```
+
+哈欠使用随包分发的 `Sources/DesktopPet/Resources/DogYawn.json` 矢量数据，Swift Package 负责生成资源包，打包脚本将其复制到应用内。离屏渲染与正常运行使用同一份资源，不需要额外下载。

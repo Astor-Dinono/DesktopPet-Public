@@ -4,15 +4,16 @@ import AppKit
 enum DogEffectsRenderer {
     private static let ink = NSColor(calibratedRed: 0.38, green: 0.36, blue: 0.34, alpha: 1)
 
-    static func drawSleep(_ pose: PetPose) {
+    static func drawSleep(_ pose: PetPose, emphasized: Bool = false) {
         // A sparse staggered trio. No particles or growing queue.
         for index in 0..<3 {
             let phase = (pose.sleepAge / 4.8 + Double(index) / 3).truncatingRemainder(dividingBy: 1)
-            let alpha = sin(phase * .pi) * pose.sleepLetters * 0.42
+            let alpha = sin(phase * .pi) * pose.sleepLetters * (emphasized ? 0.56 : 0.42)
             let drift = pose.reducedMotion ? 0 : phase * 25
             let text = index == 2 ? "Z" : "z"
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 12 + Double(index) * 3, weight: .medium),
+                .font: NSFont.systemFont(ofSize: (12 + Double(index) * 3) * (emphasized ? 1.08 : 1),
+                    weight: emphasized ? .semibold : .medium),
                 .foregroundColor: ink.withAlphaComponent(alpha)
             ]
             (text as NSString).draw(at: NSPoint(x: 168 + Double(index) * 12, y: 140 + Double(index) * 14 + drift), withAttributes: attributes)

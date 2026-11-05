@@ -31,6 +31,8 @@ mkdir -p "$STAGE_APP/Contents/MacOS" "$STAGE_APP/Contents/Resources"
 cp "$BIN_DIR/DesktopPet" "$STAGE_APP/Contents/MacOS/DesktopPet"
 cp "$PROJECT_DIR/Info.plist" "$STAGE_APP/Contents/Info.plist"
 cp "$PROJECT_DIR/docs/PRIVACY.md" "$STAGE_APP/Contents/Resources/PRIVACY.md"
+# SwiftPM's artwork bundle must travel with the app, never depend on a build checkout.
+/usr/bin/ditto "$BIN_DIR/DesktopPet_DesktopPet.bundle" "$STAGE_APP/Contents/Resources/DesktopPet_DesktopPet.bundle"
 SPARKLE_DIR="$PROJECT_DIR/.build/artifacts/sparkle/Sparkle"
 SPARKLE_FRAMEWORK="$SPARKLE_DIR/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
 if [[ ! -d "$SPARKLE_FRAMEWORK" ]]; then

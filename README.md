@@ -4,19 +4,20 @@
 
 [官网与下载](https://desktop-pet-dog.pages.dev/) · [Mac 安装与更新](https://desktop-pet-dog.pages.dev/install.html) · [Windows 试用版](https://desktop-pet-dog.pages.dev/windows.html)
 
-## Mac build 54 / Windows build 12：还是那只小狗，更圆润一点
+## Mac build 57：困了，就打个哈欠
 
-1. 耳朵转折与连接更圆顺，减少线条接头的小鼓包
-2. 微调头部与尾尖曲线，内部线条更轻，底线更紧凑
-3. 原来的表情、呼吸、摇尾巴和悬停摸摸、按住拖动保持，计数与设置继续保留
+1. 睡前打一个大大的哈欠，闭眼后轻轻摇一下尾巴，再安静睡着
+2. 睡着时悬停轻轻摸摸，只会慢慢脸红，不会被叫醒；点击或拖动仍能唤醒
+3. 睡觉的 zzZ 稍微更清楚，依旧轻轻飘出、慢慢淡去
+4. 原有计数与设置继续保留；Windows 保持 build 12
 
 ## 下载与使用
 
-1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 54](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b54-arm64.zip)
+1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 57](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b57-arm64.zip)
 2. Windows 10（1809 或更新）/11，64 位 x64：[下载 Windows build 12 安装程序](https://desktop-pet-dog.pages.dev/updates/DesktopPet-Windows-0.1.0-b12-x64-Setup.exe)
 3. 已安装的小狗可右键 → 更多 → 检查更新，确认后下载安装，保留原计数和设置
 4. Mac 当前为开发签名测试版，尚未完成 Developer ID 签名与公证；Windows 安装包尚无 Authenticode 代码签名，首次打开可能出现系统安全提示，请核对下载来源并自行决定是否运行，无需关闭系统保护
-5. 本次 Windows 轮廓精修尚未完成真实 Windows 设备验收，欢迎小范围试用反馈
+5. Windows build 12 轮廓精修尚未完成真实 Windows 设备验收，欢迎小范围试用反馈
 
 ## 小狗能做什么
 

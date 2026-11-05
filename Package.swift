@@ -8,6 +8,7 @@ let package = Package(
     dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")],
     targets: [
         .executableTarget(name: "DesktopPet", dependencies: [.product(name: "Sparkle", package: "Sparkle")],
+            resources: [.copy("Resources/DogYawn.json")],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),
         .testTarget(name: "DesktopPetTests", dependencies: ["DesktopPet"])
     ]

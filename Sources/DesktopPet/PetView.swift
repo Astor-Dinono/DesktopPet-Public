@@ -176,6 +176,7 @@ final class PetView: NSView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        motion.dogYawnEnabled = DogYawnArtwork.available
         focusRingType = .none
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
@@ -355,7 +356,13 @@ final class PetView: NSView {
         schedule(interval: reducedMotion ? 1 / 10 : 1 / 60)
     }
 
-    private func strokePet(at screenPoint: NSPoint, now time: TimeInterval) {
+    private func strokePet(at screenPoint: NSPoint, now time: TimeInterval, fromHover: Bool = false) {
+        if fromHover, motion.sleepStarted != nil {
+            motion.sootheSleeping(now: time)
+            needsDisplay = true
+            schedule(interval: reducedMotion ? 1 / 10 : 1 / 60)
+            return
+        }
         let bounces = time - lastStrokeBounce >= 0.65
         motion.stroke(now: time, bounces: bounces)
         if bounces { lastStrokeBounce = time }
@@ -389,7 +396,7 @@ final class PetView: NSView {
         let screenPoint = window.convertPoint(toScreen: convert(point, to: nil))
         if hover.update(screenPoint, now: hoverTime ?? now,
             inside: containsInteraction(point, includesBaseline: false), allowed: true) {
-            strokePet(at: screenPoint, now: now)
+            strokePet(at: screenPoint, now: now, fromHover: true)
         }
     }
 

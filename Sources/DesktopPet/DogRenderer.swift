@@ -148,7 +148,7 @@ enum DogRenderer {
         return mouth
     }()
 
-    private static func headTransform(_ pose: PetPose) -> CGAffineTransform {
+    static func headTransform(_ pose: PetPose) -> CGAffineTransform {
         let anchorX = p(305, 268).x
         // Slow, visible breathing at the smallest size, anchored to the bottom edge.
         let height = 1 + pose.breath * 0.040 - pose.squash - pose.sleepSettle * 0.025 + pose.wakeStretch
@@ -157,7 +157,7 @@ enum DogRenderer {
             .scaledBy(x: width, y: height).translatedBy(x: -anchorX, y: -baselineY)
     }
 
-    private static func tailTransform(_ angle: Double) -> CGAffineTransform {
+    static func tailTransform(_ angle: Double) -> CGAffineTransform {
         let root = p(574, 280)
         return CGAffineTransform(translationX: root.x, y: root.y)
             .rotated(by: angle).translatedBy(x: -root.x, y: -root.y)
@@ -166,6 +166,11 @@ enum DogRenderer {
     static func contains(_ point: NSPoint, size: NSSize, pose: PetPose = PetPose(),
                          angle: Double = 0, bend: Double = 0, tailSize: DogTailSize = .small,
                          includesBaseline: Bool = true) -> Bool {
+        if let yawn = pose.yawn, yawn.weight > 0, DogYawnArtwork.available {
+            return DogYawnArtwork.containsBlended(point, size: size, time: yawn.time,
+                tailSize: tailSize, weight: yawn.weight, normalPose: pose,
+                normalAngle: angle, normalBend: bend, includesBaseline: includesBaseline)
+        }
         let scale = min(size.width / canvas.width, size.height / canvas.height)
         guard scale > 0 else { return false }
         let local = NSPoint(x: (point.x - (size.width - canvas.width * scale) / 2) / scale,
@@ -183,6 +188,10 @@ enum DogRenderer {
 
     /// Placement-only geometry. Excludes the transparent canvas and sleep letters.
     static func headBounds(size: NSSize, pose: PetPose) -> CGRect {
+        if let yawn = pose.yawn, yawn.weight > 0, DogYawnArtwork.available {
+            return DogYawnArtwork.headBoundsBlended(size: size, time: yawn.time,
+                weight: yawn.weight, normalPose: pose)
+        }
         var transform = headTransform(pose)
         let head = headOutline.cgPath.copy(strokingWithWidth: 3.6,
             lineCap: .round, lineJoin: .round, miterLimit: 10).copy(using: &transform)!.boundingBoxOfPath
@@ -239,6 +248,23 @@ enum DogRenderer {
     static func draw(in context: CGContext, size: NSSize, pose: PetPose = PetPose(),
                      angle: Double = 0, bend: Double = 0, blink: Double = 0, tailSize: DogTailSize = .small,
                      petting: Double = 0) {
+        guard let yawn = pose.yawn, yawn.weight > 0, DogYawnArtwork.available else {
+            drawRegular(in: context, size: size, pose: pose, angle: angle, bend: bend,
+                blink: blink, tailSize: tailSize, petting: petting)
+            return
+        }
+        if yawn.weight >= 1 {
+            DogYawnArtwork.draw(in: context, size: size, time: yawn.time, tailSize: tailSize)
+            return
+        }
+        DogYawnArtwork.drawBlended(in: context, size: size, time: yawn.time, tailSize: tailSize,
+            weight: yawn.weight, normalPose: pose, normalAngle: angle, normalBend: bend,
+            blink: blink, petting: petting)
+    }
+
+    private static func drawRegular(in context: CGContext, size: NSSize, pose: PetPose,
+                     angle: Double, bend: Double, blink: Double, tailSize: DogTailSize,
+                     petting: Double) {
         context.saveGState()
         defer { context.restoreGState() }
         let scale = min(size.width / canvas.width, size.height / canvas.height)
@@ -266,6 +292,18 @@ enum DogRenderer {
         ink.setFill()
         earLines.fill()
 
+        drawFace(in: context, pose: pose, blink: blink, petting: petting)
+        context.restoreGState()
+        context.restoreGState()
+
+        stroke(baselineOutline, width: 2.5)
+        drawSleepLetters(in: context, pose: pose)
+    }
+
+    /// Draw within the head's existing transform; also used by yawn handoff.
+    static func drawFace(in context: CGContext, pose: PetPose, blink: Double, petting: Double) {
+        context.saveGState()
+        defer { context.restoreGState() }
         context.translateBy(x: 0, y: -pose.sleepSettle * 1.1)
         if pose.affection > 0 {
             for center in [p(164, 228), p(438, 244)] {
@@ -292,14 +330,12 @@ enum DogRenderer {
         stroke(mouth, width: 3.1)
 
         if pose.sleepBubble > 0 { drawBubble(pose, in: context) }
-        context.restoreGState()
-        context.restoreGState()
+    }
 
-        stroke(baselineOutline, width: 2.5)
-
+    static func drawSleepLetters(in context: CGContext, pose: PetPose) {
         context.saveGState()
         context.translateBy(x: -4, y: -70)
-        if pose.sleepLetters > 0 { DogEffectsRenderer.drawSleep(pose) }
+        if pose.sleepLetters > 0 { DogEffectsRenderer.drawSleep(pose, emphasized: true) }
         context.restoreGState()
     }
 

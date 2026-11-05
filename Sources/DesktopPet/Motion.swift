@@ -13,6 +13,8 @@ struct PetMotion {
     private var rest = RestMotion()
     private var duang = DuangMotion()
     private var sleepingAutomatically = false
+    var dogYawnEnabled = false
+    private var dogYawn = DogYawnMotion()
 
     init(now: TimeInterval, autoNap: AutoNap = .defaultValue) {
         lastInteraction = now
@@ -33,7 +35,10 @@ struct PetMotion {
 
     mutating func wake(now: TimeInterval) {
         // Already waking? Further clicks must not restart the opening eyelids.
-        if sleepStarted != nil { rest.wake(now: now) }
+        if sleepStarted != nil {
+            rest.wake(now: now)
+            dogYawn.cancel(now: now)
+        }
         lastInteraction = now
         sleepStarted = nil
         sleepingAutomatically = false
@@ -46,6 +51,7 @@ struct PetMotion {
     private mutating func enterSleep(now: TimeInterval, automatic: Bool) {
         guard sleepStarted == nil else { return }
         rest.sleep(now: now)
+        if dogYawnEnabled { dogYawn.start(now: now) }
         sleepStarted = now
         reactionStarted = nil
         sleepingAutomatically = automatic
@@ -66,6 +72,13 @@ struct PetMotion {
     mutating func stroke(now: TimeInterval, bounces: Bool) {
         wake(now: now)
         if bounces { duang.kick(now: now, strength: 0.22) }
+        reactionStarted = now
+        blush.warm(now: now)
+    }
+
+    /// Hovering warms the cheeks without interrupting sleep or the yawn timeline.
+    mutating func sootheSleeping(now: TimeInterval) {
+        guard sleepStarted != nil else { return }
         reactionStarted = now
         blush.warm(now: now)
     }
@@ -94,17 +107,19 @@ struct PetMotion {
 
     func pose(now: TimeInterval, reducedMotion: Bool = false) -> PetPose {
         let resting = rest.pose(now: now)
+        let decoration = dogYawnEnabled && !reducedMotion ? dogYawn.sleepDecorationAmount(now: now) : 1
         return PetPose(
             breath: reducedMotion ? 0 : sin(now * .pi * 2 / 4.6) * (1 + resting.settle * 0.35),
             sleep: resting.closed,
             sleepAge: resting.phaseAge,
-            sleepBubble: resting.bubble,
-            sleepLetters: resting.letters,
+            sleepBubble: resting.bubble * decoration,
+            sleepLetters: resting.letters * decoration,
             sleepSettle: reducedMotion ? 0 : resting.settle,
             wakeStretch: reducedMotion ? 0 : resting.stretch,
             affection: blush.value(now: now),
             squash: reducedMotion ? 0 : duang.value(now: now),
-            reducedMotion: reducedMotion
+            reducedMotion: reducedMotion,
+            yawn: dogYawnEnabled && !reducedMotion ? dogYawn.pose(now: now) : nil
         )
     }
 
@@ -122,6 +137,7 @@ struct PetMotion {
         isDragging || duang.isMoving(now: now)
             || reactionStarted.map { now - $0 < 2.6 } == true
             || rest.isTransitioning(now: now)
+            || (dogYawnEnabled && dogYawn.isAnimating(now: now))
     }
 }
 
@@ -169,6 +185,7 @@ struct PetPose {
     var hearts: [HeartPose] = []
     var squash: Double = 0
     var reducedMotion = false
+    var yawn: DogYawnPose?
 }
 
 struct HeartPose {

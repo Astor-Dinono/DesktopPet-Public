@@ -4,6 +4,26 @@ import AppKit
 struct DesktopPetApp {
     @MainActor
     static func main() {
+        if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render-yawn-previews" {
+            guard DogYawnArtwork.available else { fputs("Yawn artwork missing\n", stderr); exit(1) }
+            do {
+                let directory = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                var motion = PetMotion(now: 0)
+                motion.dogYawnEnabled = true
+                motion.sleep(now: 0)
+                for time in [0.08, 0.5, 1.2, 2.5, 3.2, 3.6, 4.18, 4.8] {
+                    try DogRenderer.renderPNG(pose: motion.pose(now: time),
+                        to: directory.appendingPathComponent("sleep-\(time).png"),
+                        background: NSColor(calibratedWhite: 0.12, alpha: 1))
+                }
+                motion.wake(now: 1.2)
+                try DogRenderer.renderPNG(pose: motion.pose(now: 1.32),
+                    to: directory.appendingPathComponent("interrupted.png"),
+                    background: NSColor(calibratedWhite: 0.12, alpha: 1))
+            } catch { fputs("Yawn preview failed: \(error)\n", stderr); exit(1) }
+            return
+        }
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--render-interaction-effects" {
             do {
                 let directory = URL(fileURLWithPath: CommandLine.arguments[2], isDirectory: true)
