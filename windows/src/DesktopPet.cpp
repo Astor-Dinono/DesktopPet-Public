@@ -360,18 +360,28 @@ struct App {
         }
         auto drawNormalFace=[&](Graphics& faceGraphics){
         path(faceGraphics,mouth,faceTransform,ink,dog::mouthWidth*unit());ellipse(faceGraphics,faceTransform,{285,206},17.57,10.95,ink);
-        double closed=1-(1-restPose.closed)*(1-dog::blink(t,reduced));
+        const double blink=dog::blink(t,reduced),closed=1-(1-restPose.closed)*(1-blink);
         double happy=petExpression.value(t)*(1-restPose.closed);if(reduced)happy=happy>.05?1:0;
         auto drawEye=[&](dog::Point p,bool leftEye){
             auto eye=dog::squeezeEye(p,leftEye,closed,happy);
+            if(!eye.outline.empty())path(faceGraphics,eye.outline,faceTransform,ink,0,ink);
             if(eye.normalAlpha>0)path(faceGraphics,eye.normal,faceTransform,ink,0,Color(alpha(eye.normalAlpha),0,0,0));
             if(eye.squeezeAlpha>0)path(faceGraphics,eye.squeeze,faceTransform,Color(alpha(eye.squeezeAlpha),0,0,0),eye.strokeWidth*unit());
         };
-        drawEye({200,198},true);drawEye({398,218},false);
+        if(happy>0){drawEye({200,198},true);drawEye({398,218},false);
+        }else if(restPose.closed>=1){
+            yawnDrawing->drawSleepEyes(faceGraphics,headTransform);
+        }else if(restPose.closed>0){
+            const BYTE gray=BYTE(std::lround(9*restPose.closed));const Color eyeInk(255,gray,gray,gray);
+            for(std::size_t i=0;i<2;++i){
+                const auto eye=dog::yawnSleepTransitionEye(i,i==0?dog::Point{200,198}:dog::Point{398,218},restPose.closed,blink,restPose.settle);
+                path(faceGraphics,eye,faceTransform,eyeInk,0,eyeInk);
+            }
+        }else{drawEye({200,198},true);drawEye({398,218},false);}
         Color cheek(alpha(blush.value(t)*.36),255,128,153);ellipse(faceGraphics,faceTransform,{164,228},26.5,9.5,cheek);ellipse(faceGraphics,faceTransform,{438,244},26.5,9.5,cheek);
         if(restPose.bubble>.001){double growth=(reduced?1:restPose.bubble)*(1+breath*.09);auto bubbleTransform=[&](dog::Point p){return faceTransform({301+p.x*growth/dog::sourceScale,208+p.y*growth/dog::sourceScale});};path(faceGraphics,bubble,bubbleTransform,Color(alpha(restPose.bubble*.65),102,158,184),.85*settings.size*dpi*(reduced?1:restPose.bubble),Color(alpha(restPose.bubble*.35),209,237,255));static auto glint=dog::parsePath("M9 12 C8 10 9 8 10 8");path(faceGraphics,glint,bubbleTransform,Color(alpha(restPose.bubble*.8),255,255,255),1.4*settings.size*dpi*(reduced?1:restPose.bubble));}
         };
-        if(yawnWeight>0){
+        if(yawnWeight>0||restPose.closed>0){
             if(!yawnDrawing)yawnDrawing=std::make_unique<dog::YawnDrawing>();
             if(!yawnDrawing->drawFaces(g,side,clip,yawnTime,yawnWeight,headTransform,drawNormalFace))return false;
         }else drawNormalFace(g);

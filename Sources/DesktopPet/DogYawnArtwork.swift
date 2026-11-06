@@ -143,6 +143,103 @@ enum DogYawnArtwork {
             blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 
+    /// Reuse the final recorded lids in head-local coordinates. Extract once;
+    /// sleeping never reparses the clip or keeps its playback clock running.
+    static let sleepEyeOutlines: [CGPath]? = {
+        guard let frame = artwork?.frames.last else { return nil }
+        var pieces: [CGPath] = []
+        var current = CGMutablePath()
+        frame.face.applyWithBlock { element in
+            let e = element.pointee
+            switch e.type {
+            case .moveToPoint: current = CGMutablePath(); current.move(to: e.points[0])
+            case .addLineToPoint: current.addLine(to: e.points[0])
+            case .closeSubpath: current.closeSubpath(); pieces.append(current.copy()!)
+            default: break // Recorded resource contains only M/L/Z commands.
+            }
+        }
+        var inverse = frame.headTransform.inverted()
+        let local = pieces.compactMap { $0.copy(using: &inverse) }
+        var eyes: [CGPath] = []
+        for (x, y) in [(200.0, 198.0), (398.0, 218.0)] {
+            let center = CGPoint(x: x * sourceScale, y: (268 - y) * sourceScale + DogRenderer.baselineY)
+            func distance(_ path: CGPath) -> Double {
+                let box = path.boundingBoxOfPath
+                return hypot(box.midX - center.x, box.midY - center.y)
+            }
+            guard let eye = local.min(by: { distance($0) < distance($1) }), distance(eye) < 10 else { return nil }
+            eyes.append(eye)
+        }
+        return eyes
+    }()
+
+    static func drawSleepEyes(in context: CGContext, outlines: [CGPath]) {
+        context.setFillColor(faceColor)
+        for path in outlines { context.addPath(path); context.fillPath(using: .evenOdd) }
+    }
+
+    private struct EyeArcs { let upper: [CGPoint]; let lower: [CGPoint] }
+    nonisolated private static let eyeArcSteps = 64
+    private static let sleepEyeArcs: [EyeArcs]? = sleepEyeOutlines.map { eyes in
+        eyes.map { eye in
+            var points: [CGPoint] = []
+            eye.applyWithBlock { e in
+                if e.pointee.type == .moveToPoint || e.pointee.type == .addLineToPoint { points.append(e.pointee.points[0]) }
+            }
+            let left = points.indices.min { points[$0].x < points[$1].x }!
+            let right = points.indices.max { points[$0].x < points[$1].x }!
+            func arc(_ direction: Int) -> [CGPoint] {
+                var result = [points[left]], index = left
+                while index != right { index = (index + direction + points.count) % points.count; result.append(points[index]) }
+                var lengths = [0.0]
+                for i in 1..<result.count { lengths.append(lengths.last! + hypot(result[i].x - result[i-1].x, result[i].y - result[i-1].y)) }
+                var segment = 1
+                return (0...eyeArcSteps).map { step in
+                    let distance = lengths.last! * Double(step) / Double(eyeArcSteps)
+                    while segment < lengths.count - 1 && lengths[segment] < distance { segment += 1 }
+                    let t = (distance - lengths[segment-1]) / max(1e-12, lengths[segment] - lengths[segment-1])
+                    return CGPoint(x: result[segment-1].x + (result[segment].x - result[segment-1].x) * t,
+                        y: result[segment-1].y + (result[segment].y - result[segment-1].y) * t)
+                }
+            }
+            let a = arc(1), b = arc(-1)
+            return a.reduce(0, { $0 + $1.y }) > b.reduce(0, { $0 + $1.y })
+                ? EyeArcs(upper: a, lower: b) : EyeArcs(upper: b, lower: a)
+        }
+    }
+
+    /// One opaque contour opens from the recorded lid to the ordinary eye.
+    /// Pair upper/lower arcs by eye corners, never crossfade two different eyes.
+    static func sleepTransitionEye(index: Int, center: CGPoint, sleep: Double,
+                                   blink: Double, settle: Double) -> CGPath? {
+        guard let eyes = sleepEyeOutlines, let arcs = sleepEyeArcs, eyes.indices.contains(index) else { return nil }
+        let amount = min(1, max(0, sleep))
+        if amount == 0 { return DogRenderer.eyeOutline(at: center, closed: blink).cgPath }
+        if amount == 1 {
+            var shift = CGAffineTransform(translationX: 0, y: settle * 1.1)
+            return eyes[index].copy(using: &shift)
+        }
+        let w = 5.4 + blink * 0.9, h = 5.4 * (1 - blink) + blink * 1.52, sag = -blink * 1.8
+        func target(_ step: Int, upper: Bool) -> CGPoint {
+            let u = Double(step) / Double(eyeArcSteps), first = u <= 0.5, t = first ? u * 2 : (u - 0.5) * 2
+            let y = center.y + sag + (upper ? h : -h), k = 0.55228475
+            let p: [CGPoint] = first
+                ? [CGPoint(x: center.x-w, y: center.y), CGPoint(x: center.x-w, y: center.y+(y-center.y)*k), CGPoint(x: center.x-w*k, y: y), CGPoint(x: center.x, y: y)]
+                : [CGPoint(x: center.x, y: y), CGPoint(x: center.x+w*k, y: y), CGPoint(x: center.x+w, y: center.y+(y-center.y)*k), CGPoint(x: center.x+w, y: center.y)]
+            let v = 1-t
+            return CGPoint(x: v*v*v*p[0].x + 3*v*v*t*p[1].x + 3*v*t*t*p[2].x + t*t*t*p[3].x,
+                y: v*v*v*p[0].y + 3*v*v*t*p[1].y + 3*v*t*t*p[2].y + t*t*t*p[3].y)
+        }
+        func mixed(_ step: Int, upper: Bool) -> CGPoint {
+            let a = target(step, upper: upper), b = upper ? arcs[index].upper[step] : arcs[index].lower[step]
+            return CGPoint(x: a.x + (b.x-a.x)*amount, y: a.y + (b.y+settle*1.1-a.y)*amount)
+        }
+        let result = CGMutablePath(); result.move(to: mixed(0, upper: true))
+        for i in 1...eyeArcSteps { result.addLine(to: mixed(i, upper: true)) }
+        for i in (0..<eyeArcSteps).reversed() { result.addLine(to: mixed(i, upper: false)) }
+        result.closeSubpath(); return result
+    }
+
     private static func inkOutline(_ path: CGPath) -> CGPath {
         path.copy(strokingWithWidth: 3.6, lineCap: .round, lineJoin: .round, miterLimit: 10)
     }

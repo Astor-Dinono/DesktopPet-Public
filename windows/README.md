@@ -1,6 +1,12 @@
 # Windows 小狗桌宠
 
-Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 14，Mac 保持 build 57。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
+Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 16，Mac 为 build 60。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
+
+## build 16：睡眼和摸摸，衔接更自然
+
+1. 打完哈欠后保持完整睡眼，衔接时不再收缩
+2. 睁眼与摸摸的 `><` 表情用单个眼形连续变化，原时序与计数、设置保留
+3. 四套相关逻辑测试与交叉构建通过；Windows 原生显示及完整升级仍待实机确认
 
 ## build 14：打个哈欠，再睡一会儿
 

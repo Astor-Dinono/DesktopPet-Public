@@ -4,7 +4,7 @@
 #include <memory>
 
 namespace dog {
-// All recorded faces are native, immutable GDI+ paths. The two small buffers are
+// All recorded faces are native, immutable GDI+ paths. The small buffers are
 // reused only during handoffs, so overlapping face features add their weighted
 // premultiplied colors once, just like the Mac's isolated plus-lighter group.
 // Head, ears and tail stay outside these layers and remain one opaque shape.
@@ -12,6 +12,7 @@ class YawnDrawing {
     struct Layer {std::uint32_t fill;std::unique_ptr<Gdiplus::GraphicsPath> path;};
     struct Frame {std::unique_ptr<Gdiplus::GraphicsPath> face;std::vector<Layer> layers;};
     std::array<Frame,yawn_data::frames.size()> frames;
+    std::array<std::unique_ptr<Gdiplus::GraphicsPath>,2> sleepEyes;
     struct FaceBuffer {
         int side=0;std::vector<std::uint32_t> pixels;
         std::unique_ptr<Gdiplus::Bitmap> bitmap;
@@ -35,6 +36,18 @@ class YawnDrawing {
             graphics->SetClip(&clip);
         }
     } normalBuffer,recordedBuffer;
+
+    static void mix(FaceBuffer& target,FaceBuffer& source,double weight) {
+        target.graphics->Flush(Gdiplus::FlushIntentionSync);
+        source.graphics->Flush(Gdiplus::FlushIntentionSync);
+        const unsigned w=unsigned(std::lround(weight*65535)),inverse=65535-w;
+        for(std::size_t i=0;i<target.pixels.size();++i){
+            const auto a=target.pixels[i],b=source.pixels[i];std::uint32_t mixed=0;
+            for(unsigned shift=0;shift<32;shift+=8)
+                mixed|=((((a>>shift)&255)*inverse+((b>>shift)&255)*w+32767)/65535)<<shift;
+            target.pixels[i]=mixed;
+        }
+    }
 
     static std::unique_ptr<Gdiplus::GraphicsPath> trace(yawn_data::Path source) {
         auto result=std::make_unique<Gdiplus::GraphicsPath>(Gdiplus::FillModeAlternate);
@@ -71,23 +84,39 @@ public:
             for(std::size_t j=0;j<source.layerCount;++j){const auto& layer=yawn_data::layers[source.layerOffset+j];
                 frame.layers.push_back({layer.fill,trace(layer.path)});}
         }
+        const auto& paths=yawnSleepEyePaths();
+        for(std::size_t i=0;i<sleepEyes.size();++i){
+            sleepEyes[i]=std::make_unique<Gdiplus::GraphicsPath>(Gdiplus::FillModeAlternate);
+            Gdiplus::PointF current{};
+            for(const auto& segment:paths[i]){
+                if(segment.type=='Z'){sleepEyes[i]->CloseFigure();continue;}
+                const auto p=segment.points[0];const Gdiplus::PointF point{Gdiplus::REAL(p.x),Gdiplus::REAL(p.y)};
+                if(segment.type=='M')sleepEyes[i]->StartFigure();else sleepEyes[i]->AddLine(current,point);
+                current=point;
+            }
+        }
+    }
+    template<class Transform> void drawSleepEyes(Gdiplus::Graphics& g,Transform headTransform) const {
+        const auto origin=headTransform({0,0}),x=headTransform({1,0})-origin,y=headTransform({0,1})-origin;
+        Gdiplus::Matrix transform(Gdiplus::REAL(x.x),Gdiplus::REAL(x.y),Gdiplus::REAL(y.x),
+            Gdiplus::REAL(y.y),Gdiplus::REAL(origin.x),Gdiplus::REAL(origin.y));
+        const auto saved=g.Save();g.MultiplyTransform(&transform);
+        Gdiplus::SolidBrush ink(Gdiplus::Color(255,9,9,9));
+        for(const auto& eye:sleepEyes)g.FillPath(&ink,eye.get());
+        g.Restore(saved);
     }
     template<class Transform,class Normal> bool drawFaces(Gdiplus::Graphics& g,int side,
-            const Gdiplus::GraphicsPath& clip,double time,double weight,Transform sharedHead,Normal normal) {
+            const Gdiplus::GraphicsPath& clip,double time,double weight,
+            Transform sharedHead,Normal normal) {
         weight=std::isfinite(weight)?clamp(weight):0;
         if(weight<=0){normal(g);return true;}
         if(weight>=1){recorded(g,time,sharedHead);return true;}
-        if(!normalBuffer.resize(side)||!recordedBuffer.resize(side))return false;
-        normalBuffer.clear(clip);recordedBuffer.clear(clip);
-        normal(*normalBuffer.graphics);recorded(*recordedBuffer.graphics,time,sharedHead);
-        normalBuffer.graphics->Flush(Gdiplus::FlushIntentionSync);
-        recordedBuffer.graphics->Flush(Gdiplus::FlushIntentionSync);
-        const unsigned w=unsigned(std::lround(weight*65535)),inverse=65535-w;
-        for(std::size_t i=0;i<normalBuffer.pixels.size();++i){
-            const auto a=normalBuffer.pixels[i],b=recordedBuffer.pixels[i];std::uint32_t mixed=0;
-            for(unsigned shift=0;shift<32;shift+=8)
-                mixed|=((((a>>shift)&255)*inverse+((b>>shift)&255)*w+32767)/65535)<<shift;
-            normalBuffer.pixels[i]=mixed;
+        if(!normalBuffer.resize(side))return false;
+        normalBuffer.clear(clip);normal(*normalBuffer.graphics);
+        if(weight>0){
+            if(!recordedBuffer.resize(side))return false;
+            recordedBuffer.clear(clip);recorded(*recordedBuffer.graphics,time,sharedHead);
+            mix(normalBuffer,recordedBuffer,weight);
         }
         // Explicit pixel units keep the handoff aligned on 125%/150% displays;
         // the bitmap's nominal DPI must never resize the face independently.

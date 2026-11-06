@@ -9,6 +9,59 @@
 namespace {
 bool near(double a,double b,double epsilon=1e-12){return std::abs(a-b)<epsilon;}
 void pointNear(dog::Point a,dog::Point b){assert(std::hypot(a.x-b.x,a.y-b.y)<1e-10);}
+double cross(dog::Point a,dog::Point b,dog::Point c){return (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);}
+std::vector<dog::Point> polygon(const std::vector<dog::Segment>& path){
+    std::vector<dog::Point> result;
+    for(const auto& s:path)if(s.type=='M'||s.type=='L')result.push_back(s.points[0]);
+    if(result.size()>1&&std::hypot(result.back().x-result.front().x,result.back().y-result.front().y)<1e-10)result.pop_back();
+    return result;
+}
+double nearestEdge(dog::Point point,const std::vector<dog::Point>& points){
+    double distance=1e100;
+    for(std::size_t i=0;i<points.size();++i){
+        const auto a=points[i],d=points[(i+1)%points.size()]-a,q=point-a;
+        const double length=d.x*d.x+d.y*d.y,t=length>0?dog::clamp((q.x*d.x+q.y*d.y)/length):0;
+        const auto delta=q-d*t;distance=std::min(distance,std::hypot(delta.x,delta.y));
+    }
+    return distance;
+}
+void checkSleepMorph(){
+    using namespace dog;
+    for(std::size_t eye=0;eye<2;++eye){const Point center=eye==0?Point{200,198}:Point{398,218};
+        for(double blink:{0.,.25,.5,.85,1.})for(double settle:{0.,.5,1.}){
+            const auto awake=yawnSleepTransitionEye(eye,center,0,blink,settle);const auto original=eyePath(center,blink);
+            assert(awake.size()==original.size());
+            for(std::size_t i=0;i<awake.size();++i){assert(awake[i].type==original[i].type);
+                for(int j=0;j<(awake[i].type=='C'?3:awake[i].type=='Z'?0:1);++j)pointNear(awake[i].points[j],original[i].points[j]);}
+            const auto asleep=yawnSleepTransitionEye(eye,center,1,blink,settle);
+            const auto& traced=yawnSleepEyePaths()[eye];assert(asleep.size()==traced.size());
+            for(std::size_t i=0;i+1<asleep.size();++i)
+                pointNear(asleep[i].points[0]+Point{0,settle*1.1/sourceScale},traced[i].points[0]);
+        }
+        // The limit approaching full sleep must remain visually coincident
+        // with the traced endpoint, despite resampling its small stair steps.
+        const auto nearSleep=polygon(yawnSleepTransitionEye(eye,center,1-1e-8,0,0));
+        const auto exactSleep=polygon(yawnSleepEyePaths()[eye]);
+        for(const auto& p:nearSleep)assert(nearestEdge(p,exactSleep)*sourceScale<.15);
+        for(const auto& p:exactSleep)assert(nearestEdge(p,nearSleep)*sourceScale<.15);
+        // Every waking contour stays finite and free of crossing edges,
+        // including a blink that coincides with waking. Its signed area must
+        // retain one orientation instead of collapsing or flipping inside out.
+        for(double blink:{0.,.25,.5,.85,1.})for(int frame=1;frame<100;++frame){
+            const double amount=frame/100.0;
+            const auto points=polygon(yawnSleepTransitionEye(eye,center,amount,blink,.65));
+            assert(points.size()==2*sleepEyeArcSteps);double area=0;
+            for(std::size_t i=0;i<points.size();++i){const auto a=points[i],b=points[(i+1)%points.size()];
+                assert(std::isfinite(a.x)&&std::isfinite(a.y));area+=a.x*b.y-b.x*a.y;
+                for(std::size_t j=i+2;j<points.size();++j){if(i==0&&j+1==points.size())continue;
+                    const auto c=points[j],d=points[(j+1)%points.size()];
+                    assert(!(cross(a,b,c)*cross(a,b,d)<-1e-10&&cross(c,d,a)*cross(c,d,b)<-1e-10));
+                }
+            }
+            assert(area>0);
+        }
+    }
+}
 template<class Transform> std::string segments(const std::vector<dog::Segment>& path,Transform transform){
     std::ostringstream out;out<<std::setprecision(14);
     for(const auto& s:path){out<<s.type;for(int i=0;i<(s.type=='C'?3:s.type=='Z'?0:1);++i){
@@ -53,6 +106,7 @@ void preview(const char* destination){
 
 int main(int argc,char** argv){
     using namespace dog;
+    checkSleepMorph();
     static_assert(yawn_data::frames.size()==97);
     assert(near(yawn_data::duration,4.062548752834467));
     for(std::size_t i=0;i<97;++i){const double time=i/24.0;
@@ -61,7 +115,7 @@ int main(int argc,char** argv){
     }
     assert(yawnFrameIndex(4.05)==96&&yawnFrameIndex(100)==96&&yawnFrameIndex(-1)==0);
     assert(yawnFrameIndex(std::numeric_limits<double>::quiet_NaN())==0);
-    // Independent reference JavaScript measurements also used by the macOS tests.
+    // Independent r4 JavaScript measurements also used by the macOS tests.
     constexpr double samples[][4]={{.4,-.03512683142937234,.9945832750304672,0},
         {1.3,-.1715046369687948,.9854226334133491,0},{2,-.02702736449967358,.9957181475680419,0},
         {3.2125,-.05499999999999996,1,.08775825618903717},{3.6375,.054999999999999924,1,-.08775825618903722}};
@@ -112,6 +166,35 @@ int main(int argc,char** argv){
         }};check(frame.face);
         for(std::size_t i=0;i<frame.layerCount;++i)check(yawn_data::layers[frame.layerOffset+i].path);
     }
+    // Independently locate the final source contours by their reviewed x
+    // ranges, then require every sleeping-eye vertex to land on that contour.
+    // A matching stroke width alone cannot pass this: the whole arch, width,
+    // and placement must survive every shared-head handoff weight, including
+    // reduced motion and partial waking when the ordinary face is not settled.
+    const auto& last=yawn_data::frames.back();const auto finalHead=recordedYawnHead(last.time);
+    const auto& sleepingEyes=yawnSleepEyePaths();std::array<std::vector<Point>,2> tracedEyes;
+    for(std::size_t i=last.face.offset;i<last.face.offset+last.face.count;){
+        const auto command=yawn_data::commands[i++];if(command==2)continue;
+        const auto x=yawn_data::commands[i++],y=yawn_data::commands[i++];
+        if(x>=294&&x<=378)tracedEyes[0].push_back(yawnTracedPoint(x,y));
+        if(x>=635&&x<=720)tracedEyes[1].push_back(yawnTracedPoint(x,y));
+    }
+    assert(tracedEyes[0].size()==83&&tracedEyes[1].size()==84);
+    Rest sleeping;sleeping.setSleep(true,0);const auto sleepPose=sleeping.pose(yawn_data::duration);
+    assert(sleepPose.closed==1&&sleepPose.settle==1);
+    for(std::size_t eye=0;eye<sleepingEyes.size();++eye){
+        assert(sleepingEyes[eye].size()==tracedEyes[eye].size()+1);
+        assert(sleepingEyes[eye].front().type=='M'&&sleepingEyes[eye].back().type=='Z');
+        for(std::size_t i=0;i<tracedEyes[eye].size();++i){
+            const auto p=sleepingEyes[eye][i].points[0];
+            pointNear(finalHead.apply(p),tracedEyes[eye][i]);
+            for(double settle:{0.,.5,1.})for(double weight:{0.,.2,.5,.8,1.})for(double scale:{.5,.62,.75})for(int orientation=0;orientation<4;++orientation){
+                const auto shared=blendedYawnHead(yawn_data::duration,weight,.99+settle*.010,1.03-settle*.025);
+                auto project=[&](Point value){return rotated(value*sourceScale*scale,orientation*pi/2);};
+                pointNear(project(shared.apply(p)),project(shared.apply(finalHead.inverse(tracedEyes[eye][i]))));
+            }
+        }
+    }
     if(argc==3&&std::string(argv[1])=="--preview")preview(argv[2]);
-    std::cout<<"PASS: 97 frame times, exact reference tail samples, recorded head/face parity, single transform handoffs, tail sizes, rotation-safe canvas bounds\n";
+    std::cout<<"PASS: 97 frame times, exact r4 tail samples, recorded head/face parity, exact sleeping-eye endpoints, 990 non-crossing wake/blink contours, sleeping-eye handoff at all sizes/orientations, tail sizes and canvas bounds\n";
 }

@@ -312,12 +312,21 @@ enum DogRenderer {
                 cheek.fill()
             }
         }
-        // Sleep retains the original eye. Petting briefly hands off to the selected >< lid.
+        // Sleeping retains the last yawn lids; blinking and petting keep their own shapes.
         let closed = 1 - (1 - pose.sleep) * (1 - blink)
         let happy = DogSqueezeEyes.effectiveAmount(petting: petting, sleep: pose.sleep, reducedMotion: pose.reducedMotion)
         if happy > 0 {
             DogSqueezeEyes.draw(at: p(200, 198), left: true, normalClosed: closed, amount: happy)
             DogSqueezeEyes.draw(at: p(398, 218), left: false, normalClosed: closed, amount: happy)
+        } else if pose.sleep > 0, DogYawnArtwork.sleepEyeOutlines != nil {
+            let amount = min(1, pose.sleep)
+            context.setFillColor(CGColor(gray: amount * 9 / 255, alpha: 1))
+            for (index, center) in [p(200, 198), p(398, 218)].enumerated() {
+                if let eye = DogYawnArtwork.sleepTransitionEye(index: index, center: center,
+                    sleep: amount, blink: blink, settle: pose.sleepSettle) {
+                    context.addPath(eye); context.fillPath()
+                }
+            }
         } else {
             drawEye(at: p(200, 198), closed: closed)
             drawEye(at: p(398, 218), closed: closed)

@@ -17,6 +17,47 @@ dog::Point screenPoint(const App& app,dog::Point p){
         +dog::Point{double(app.windowRect.left+app.radius),double(app.windowRect.top+app.radius)};
 }
 std::vector<BYTE> pixels(const App& app){const auto* data=static_cast<const BYTE*>(app.surface.bits);return {data,data+app.surface.width*app.surface.height*4};}
+void opaqueWakeEyes(App& app){
+    const auto savedRest=app.rest;const auto savedYawn=app.yawn;
+    const double savedDpi=app.dpi,savedSize=app.settings.size;
+    app.rest={};app.rest.setSleep(true,0);app.rest.setSleep(false,10);app.yawn.clear();
+    app.dpi=2;app.settings.size=.75;
+    for(double time:{10.3,10.45,10.65}){
+        assert(app.draw(time));app.surface.graphics->Flush(FlushIntentionSync);
+        const auto rest=app.rest.pose(time);const double blink=dog::blink(time,false);
+        const double breath=std::sin(time*2*dog::pi/4.6)*(1+rest.settle*.35),squash=app.duang.value(time);
+        const double sx=1-breath*.012+squash*.48+rest.settle*.010-rest.stretch*.4,
+            sy=1+breath*.040-squash-rest.settle*.025+rest.stretch;
+        for(std::size_t eye=0;eye<2;++eye){
+            const auto outline=dog::yawnSleepTransitionEye(eye,eye==0?dog::Point{200,198}:dog::Point{398,218},rest.closed,blink,rest.settle);
+            std::vector<dog::Point> points;dog::Bounds box{1e100,1e100,-1e100,-1e100};
+            for(const auto& s:outline)if(s.type!='Z'){
+                auto p=s.points[0];p.y+=rest.settle*1.1/dog::sourceScale;
+                p=(dog::YawnHeadTransform{sx,sy,0}.apply(p)-dog::pivot)*app.unit()+dog::Point{double(app.radius),double(app.radius)};
+                points.push_back(p);box.left=std::min(box.left,p.x);box.right=std::max(box.right,p.x);
+                box.top=std::min(box.top,p.y);box.bottom=std::max(box.bottom,p.y);
+            }
+            int checked=0;const int gray=int(std::lround(9*rest.closed));
+            for(int y=int(std::floor(box.top));y<=int(std::ceil(box.bottom));++y)
+                for(int x=int(std::floor(box.left));x<=int(std::ceil(box.right));++x){
+                    const dog::Point pixel{double(x)+.5,double(y)+.5};bool inside=false;double distance=1e100;
+                    for(std::size_t i=0;i<points.size();++i){const auto a=points[i],b=points[(i+1)%points.size()];
+                        if((a.y>pixel.y)!=(b.y>pixel.y))if(pixel.x<(b.x-a.x)*(pixel.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+                        const auto d=b-a,q=pixel-a;const double length=d.x*d.x+d.y*d.y;
+                        const auto delta=q-d*(length>0?dog::clamp((q.x*d.x+q.y*d.y)/length):0);
+                        distance=std::min(distance,std::hypot(delta.x,delta.y));
+                    }
+                    // Ignore anti-aliasing at the contour edge; its interior
+                    // must stay ink-dark over the white head, without ghosts.
+                    if(!inside||distance<1.5)continue;
+                    const auto* data=static_cast<const BYTE*>(app.surface.bits)+4*(y*app.surface.width+x);
+                    assert(data[3]==255);for(int channel=0;channel<3;++channel)assert(std::abs(int(data[channel])-gray)<=1);++checked;
+                }
+            assert(checked>=8);
+        }
+    }
+    app.rest=savedRest;app.yawn=savedYawn;app.dpi=savedDpi;app.settings.size=savedSize;
+}
 }
 
 int main(){
@@ -56,6 +97,9 @@ int main(){
             }
         }
         app.dpi=1;app.angle=0;
+        // The actual app renderer must fill one dark eye throughout waking;
+        // a faded overlay on the white head fails these interior pixel checks.
+        opaqueWakeEyes(app);
         // Reduced motion draws ordinary sleep, independent of a live yawn.
         app.reduced=true;assert(app.draw(12));const auto reduced=pixels(app);const auto recorded=app.yawn;
         app.yawn.clear();assert(app.draw(12));assert(pixels(app)==reduced);app.yawn=recorded;app.reduced=false;
@@ -108,5 +152,5 @@ int main(){
         assert(DeleteFileW(app.settings.file.c_str()));DeleteFileW((app.settings.file+L".tmp").c_str());assert(RemoveDirectoryW(name));
     }
     GdiplusShutdown(token);
-    std::cout<<"PASS: native yawn handoff rendering/hit paths, reduced motion, sleeping hover, wake/drag and lifecycle cancellation; counts unchanged\n";
+    std::cout<<"PASS: native yawn handoff rendering/hit paths, opaque wake-eye interiors, reduced motion, sleeping hover, wake/drag and lifecycle cancellation; counts unchanged\n";
 }

@@ -3,6 +3,77 @@ import XCTest
 @testable import DesktopPet
 
 final class PettingExpressionTests: XCTestCase, @unchecked Sendable {
+    func testPettingDuringBlinkDoesNotFoldAnEyeCorner() async {
+        await MainActor.run {
+            func cross(_ a: CGPoint, _ b: CGPoint, _ c: CGPoint) -> Double {
+                (b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)
+            }
+            for left in [true, false] { for closed in [0.0, 0.5, 0.95, 1.0] {
+                for amount in [0.001, 0.02, 0.04, 0.1, 0.5, 0.9, 0.999] {
+                    let path = DogSqueezeEyes.transitionOutline(at: .zero, left: left, normalClosed: closed, amount: amount)
+                    var points: [CGPoint] = []
+                    path.applyWithBlock { e in
+                        if e.pointee.type == .moveToPoint || e.pointee.type == .addLineToPoint {
+                            points.append(e.pointee.points[0])
+                        }
+                    }
+                    var intersections = 0
+                    for i in 0..<(points.count-2) { for j in (i+2)..<points.count {
+                        if i == 0 && j == points.count-1 { continue }
+                        let a=points[i], b=points[(i+1)%points.count], c=points[j], d=points[(j+1)%points.count]
+                        if cross(a,b,c)*cross(a,b,d) < -1e-15 && cross(c,d,a)*cross(c,d,b) < -1e-15 {
+                            intersections += 1
+                        }
+                    }}
+                    XCTAssertEqual(intersections, 0, "left=\(left), blink=\(closed), pet=\(amount)")
+                }
+            }}
+        }
+    }
+
+    func testPettingTransitionDrawsSolidInkInsteadOfTwoFadingEyes() async throws {
+        try await MainActor.run {
+            let center = CGPoint(x: 20, y: 20)
+            for left in [true, false] { for amount in [0.1, 0.25, 0.5, 0.75, 0.9] {
+                let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 160, pixelsHigh: 160,
+                    bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                    colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                let graphics = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+                NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = graphics
+                graphics.cgContext.scaleBy(x: 4, y: 4)
+                DogSqueezeEyes.draw(at: center, left: left, normalClosed: 0, amount: amount)
+                NSGraphicsContext.restoreGraphicsState()
+                let outline = DogSqueezeEyes.transitionOutline(at: center, left: left, normalClosed: 0, amount: amount)
+                var interior = 0, faded = 0, ghost = 0
+                for y in 40..<120 { for x in 40..<120 {
+                    let p = CGPoint(x: (Double(x)+0.5)/4, y: (Double(y)+0.5)/4)
+                    let near = [p, CGPoint(x:p.x-0.35,y:p.y), CGPoint(x:p.x+0.35,y:p.y),
+                        CGPoint(x:p.x,y:p.y-0.35), CGPoint(x:p.x,y:p.y+0.35)].map { outline.contains($0) }
+                    let alpha = bitmap.colorAt(x: x, y: 159-y)!.alphaComponent
+                    if near.allSatisfy({ $0 }) { interior += 1; if alpha < 0.98 { faded += 1 } }
+                    if near.allSatisfy({ !$0 }) && alpha > 0.02 { ghost += 1 }
+                }}
+                XCTAssertGreaterThan(interior, 10)
+                XCTAssertEqual(faded, 0); XCTAssertEqual(ghost, 0)
+            }}
+            for left in [true, false] {
+                XCTAssertEqual(DogSqueezeEyes.transitionOutline(at: center, left: left, normalClosed: 0, amount: 0),
+                    DogRenderer.eyeOutline(at: center, closed: 0).cgPath)
+                let expected = DogSqueezeEyes.pose(at: center, left: left, normalClosed: 0, amount: 1).squeeze.cgPath
+                    .copy(strokingWithWidth: 1.7, lineCap: .round, lineJoin: .round, miterLimit: 10)
+                XCTAssertEqual(DogSqueezeEyes.transitionOutline(at: center, left: left, normalClosed: 0, amount: 1), expected)
+            }
+            if let directory = ProcessInfo.processInfo.environment["DESKTOP_PET_WAKE_PREVIEWS"] {
+                let url = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                for amount in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                    try DogRenderer.renderPNG(petting: amount, to: url.appendingPathComponent("pet-\(amount).png"),
+                        background: NSColor(calibratedWhite: 0.12, alpha: 1))
+                }
+            }
+        }
+    }
+
     func testRetouchKeepsPositionAndVelocityAndEventuallyClears() {
         for time in [0.08, 0.3, 0.48, 0.65, 0.82] {
             var motion = DogPetExpression()

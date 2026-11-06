@@ -3,6 +3,122 @@ import XCTest
 @testable import DesktopPet
 
 final class DogYawnArtworkTests: XCTestCase, @unchecked Sendable {
+    func testWakingEyesStayOneOpaqueShapeAndKeepBothEndpoints() async throws {
+        try await MainActor.run {
+            let centers = [CGPoint(x: 200 * 260.0 / 749, y: 70 * 260.0 / 749 + 3.8),
+                           CGPoint(x: 398 * 260.0 / 749, y: 50 * 260.0 / 749 + 3.8)]
+            for amount in [0.001, 0.1, 0.25, 0.5, 0.75, 0.9, 0.999] {
+                let pose = PetPose(sleep: amount, sleepSettle: 0.4)
+                let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+                    pixelsWide: 1040, pixelsHigh: 592, bitsPerSample: 8, samplesPerPixel: 4,
+                    hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                let graphics = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+                NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = graphics
+                graphics.cgContext.scaleBy(x: 4, y: 4)
+                DogRenderer.drawFace(in: graphics.cgContext, pose: pose, blink: 0, petting: 0)
+                NSGraphicsContext.restoreGraphicsState()
+                for (index, center) in centers.enumerated() {
+                    let shape = try XCTUnwrap(DogYawnArtwork.sleepTransitionEye(index: index, center: center,
+                        sleep: amount, blink: 0, settle: pose.sleepSettle))
+                    var shift = CGAffineTransform(translationX: 0, y: -pose.sleepSettle * 1.1)
+                    let placed = try XCTUnwrap(shape.copy(using: &shift))
+                    let box = placed.boundingBoxOfPath.insetBy(dx: -1, dy: -1)
+                    var opaqueInterior = 0, translucentInterior = 0, ghostPixels = 0
+                    for y in Int(floor(box.minY * 4))...Int(ceil(box.maxY * 4)) {
+                        for x in Int(floor(box.minX * 4))...Int(ceil(box.maxX * 4)) {
+                            let p = CGPoint(x: (Double(x)+0.5)/4, y: (Double(y)+0.5)/4)
+                            let near = [p, CGPoint(x:p.x-0.35,y:p.y), CGPoint(x:p.x+0.35,y:p.y),
+                                CGPoint(x:p.x,y:p.y-0.35), CGPoint(x:p.x,y:p.y+0.35)]
+                            let coverage = near.map { placed.contains($0) }
+                            let alpha = bitmap.colorAt(x: x, y: bitmap.pixelsHigh-1-y)!.alphaComponent
+                            if coverage.allSatisfy({ $0 }) { opaqueInterior += 1; if alpha < 0.98 { translucentInterior += 1 } }
+                            if coverage.allSatisfy({ !$0 }) && alpha > 0.02 { ghostPixels += 1 }
+                        }
+                    }
+                    XCTAssertGreaterThan(opaqueInterior, 10)
+                    XCTAssertEqual(translucentInterior, 0, "Eye must open as solid ink, not fade out at \(amount)")
+                    XCTAssertEqual(ghostPixels, 0, "A second eye escaped the moving contour")
+                }
+            }
+            for (index, center) in centers.enumerated() {
+                let sleep = try XCTUnwrap(DogYawnArtwork.sleepTransitionEye(index: index, center: center, sleep: 1, blink: 0, settle: 0))
+                XCTAssertEqual(sleep, DogYawnArtwork.sleepEyeOutlines![index])
+                let open = try XCTUnwrap(DogYawnArtwork.sleepTransitionEye(index: index, center: center, sleep: 0, blink: 0, settle: 0))
+                XCTAssertEqual(open, DogRenderer.eyeOutline(at: center, closed: 0).cgPath)
+            }
+            if let directory = ProcessInfo.processInfo.environment["DESKTOP_PET_WAKE_PREVIEWS"] {
+                let url = URL(fileURLWithPath: directory, isDirectory: true)
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+                var motion = PetMotion(now: 0); motion.dogYawnEnabled = true
+                motion.sleep(now: 0); motion.wake(now: 5)
+                for time in [0.0, 0.2, 0.35, 0.5, 0.65, 0.8] {
+                    try DogRenderer.renderPNG(pose: motion.pose(now: 5+time), to: url.appendingPathComponent("wake-\(time).png"),
+                        background: NSColor(calibratedWhite: 0.12, alpha: 1))
+                }
+            }
+        }
+    }
+
+    func testFinalYawnLidsKeepTheirSizeAndPositionThroughSleepHandoff() async throws {
+        try await MainActor.run {
+            // Independently measured final resource contours, in canonical y-up points.
+            let recorded = [CGRect(x: 59.71875, y: 23.096875, width: 17.0625, height: 6.90625),
+                            CGRect(x: 128.984375, y: 17.20625, width: 17.265625, height: 7.71875)]
+            let anchor = CGPoint(x: 305 * 260.0 / 749, y: DogRenderer.baselineY)
+            let finalHead = CGAffineTransform(translationX: anchor.x, y: anchor.y)
+                .scaledBy(x: 1, y: 366.0 / 370).translatedBy(x: -anchor.x, y: -anchor.y)
+            let outlines = try XCTUnwrap(DogYawnArtwork.sleepEyeOutlines)
+            XCTAssertEqual(outlines.count, 2)
+            for (index, path) in outlines.enumerated() {
+                let actual = path.boundingBoxOfPath.applying(finalHead)
+                XCTAssertEqual(actual.minX, recorded[index].minX, accuracy: 1e-8)
+                XCTAssertEqual(actual.minY, recorded[index].minY, accuracy: 1e-8)
+                XCTAssertEqual(actual.width, recorded[index].width, accuracy: 1e-8)
+                XCTAssertEqual(actual.height, recorded[index].height, accuracy: 1e-8)
+            }
+            for scale in [0.36, 0.62, 0.75] { for settle in [0.0, 1.0] {
+                let size = NSSize(width: 260 * scale, height: 148 * scale)
+                let normal = PetPose(breath: 0.5, sleep: 1, sleepSettle: settle)
+                let regularHead = DogRenderer.headTransform(normal)
+                for weight in [1.0, 0.75, 0.5, 0.25, 0.0] {
+                    let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+                        pixelsWide: Int(ceil(size.width * 4)), pixelsHigh: Int(ceil(size.height * 4)),
+                        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+                    let graphics = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+                    NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = graphics
+                    graphics.cgContext.scaleBy(x: 4, y: 4)
+                    DogYawnArtwork.drawBlended(in: graphics.cgContext, size: size, time: DogYawnArtwork.duration,
+                        tailSize: .small, weight: weight, normalPose: normal, normalAngle: 0,
+                        normalBend: 0, blink: 0, petting: 0)
+                    NSGraphicsContext.restoreGraphicsState()
+                    func mix(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a + (b - a) * weight }
+                    let head = CGAffineTransform(a: mix(regularHead.a, finalHead.a), b: 0, c: 0,
+                        d: mix(regularHead.d, finalHead.d), tx: mix(regularHead.tx, finalHead.tx),
+                        ty: mix(regularHead.ty, finalHead.ty))
+                    let placement = CGAffineTransform(translationX: 0, y: 1).scaledBy(x: scale, y: scale)
+                    for path in outlines {
+                        let box = path.boundingBoxOfPath.applying(head).applying(placement)
+                        var ink = CGRect.null
+                        for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                            let point = CGPoint(x: (Double(x) + 0.5) / 4,
+                                y: (Double(bitmap.pixelsHigh - y) - 0.5) / 4)
+                            guard box.insetBy(dx: -1, dy: -1).contains(point),
+                                  let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                                  color.alphaComponent > 0.9, color.redComponent < 0.3 else { continue }
+                            ink = ink.union(CGRect(x: point.x - 0.125, y: point.y - 0.125, width: 0.25, height: 0.25))
+                        }}
+                        XCTAssertFalse(ink.isNull)
+                        XCTAssertEqual(ink.width, box.width, accuracy: 0.75, "Sleep handoff shrank the lid at weight \(weight)")
+                        XCTAssertEqual(ink.height, box.height, accuracy: 0.75)
+                        XCTAssertEqual(ink.midX, box.midX, accuracy: 0.5)
+                        XCTAssertEqual(ink.midY, box.midY, accuracy: 0.5)
+                    }
+                }
+            }}
+        }
+    }
+
     func testResourceKeepsEveryRecordedPresentationTimeAndLastFrameHold() async {
         await MainActor.run {
             XCTAssertTrue(DogYawnArtwork.available)
