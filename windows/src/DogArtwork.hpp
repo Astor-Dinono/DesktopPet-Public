@@ -15,7 +15,8 @@ inline constexpr const char* heartPath="M0 0 C-3 -4 -12 -7 -9 -12 C-7 -17 -1 -17
 
 struct Segment { char type; std::array<Point,3> points{}; };
 inline std::array<Segment,6> eyePath(Point center,double closed){
-    double w=(5.4+closed*.9)/sourceScale,h=(5.4*(1-closed)+closed*.65)/sourceScale,sag=closed*1.8/sourceScale,k=.55228475;
+    // Match the ~3.04 pt lid thickness at the end of the shared yawn clip.
+    double w=(5.4+closed*.9)/sourceScale,h=(5.4*(1-closed)+closed*1.52)/sourceScale,sag=closed*1.8/sourceScale,k=.55228475;
     double top=center.y-h+sag,bottom=center.y+h+sag;
     std::array<Segment,6> s{};
     s[0].type='M';s[0].points[0]={center.x-w,center.y};

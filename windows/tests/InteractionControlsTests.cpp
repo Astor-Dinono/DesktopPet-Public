@@ -43,8 +43,19 @@ int main(){
     SetActiveWindow(peer);SetFocus(peer);assert(!app.selected);
     assert(GetWindowLongPtrW(window,GWL_EXSTYLE)&WS_EX_NOACTIVATE);
 
+    RECT work{};assert(SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0));
+    app.angle=0;app.turning=false;app.dpi=1;app.settings.orientation=0;
+    const auto petExtent=dog::extent(0,app.unit());
+    app.center={double(work.left+work.right)/2,work.bottom-petExtent.bottom};
+    const POINT menuAnchor{LONG(std::lround(app.center.x)),LONG(std::lround(app.center.y))};
+    auto checkMenuPlacement=[&](){
+        RECT r{};assert(GetWindowRect(app.contextMenu.windowHandle(),&r));
+        assert(r.left>=work.left&&r.right<=work.right&&r.top>=work.top&&r.bottom<=work.bottom);
+        if(work.right-work.left>=800&&work.bottom-work.top>=600){auto pet=app.menuAvoidBounds();assert(pet);assert(dog::menu::overlapArea({double(r.left),double(r.top),double(r.right),double(r.bottom)},*pet)==0);}
+    };
     unsigned expected=app.settings.effectsMask;
-    app.menu({100,100},dog::menu::Page::Effects);
+    app.menu(menuAnchor,dog::menu::Page::Effects);
+    checkMenuPlacement();
     HWND popup=app.contextMenu.windowHandle();assert(popup&&app.menuOpen);
     for(int pass=0;pass<2;++pass)for(unsigned index=0;index<4;++index){
         HWND checkbox=GetDlgItem(popup,EffectHeart+index);
@@ -52,12 +63,14 @@ int main(){
         SendMessageW(checkbox,BM_CLICK,0,0);expected^=1u<<index;
         assert(app.settings.effectsMask==expected&&IsWindow(popup)&&IsWindow(window));
     }
-    auto click=[&](int id){HWND child=GetDlgItem(popup,id);assert(child);SendMessageW(child,BM_CLICK,0,0);};
+    auto click=[&](int id){HWND child=GetDlgItem(popup,id);assert(child);SendMessageW(child,BM_CLICK,0,0);if(app.contextMenu.windowHandle())checkMenuPlacement();};
     click(dog::menu::Back);assert(!GetDlgItem(popup,Quit));assert(GetDlgItem(popup,Pet));
     app.hearts.items.clear();click(Pet);click(Pet);assert(app.hearts.items.size()==2&&IsWindow(popup));
     click(dog::menu::Appearance);
     HWND size=GetDlgItem(popup,dog::menu::SizeChoice);assert(size);
     SendMessageW(size,CB_SETCURSEL,2,0);SendMessageW(popup,WM_COMMAND,MAKEWPARAM(dog::menu::SizeChoice,CBN_SELCHANGE),LPARAM(size));
+    checkMenuPlacement();
+    const auto currentFont=HFONT(SendMessageW(size,WM_GETFONT,0,0));LOGFONTW fontInfo{};assert(GetObjectW(currentFont,sizeof(fontInfo),&fontInfo));
     assert(app.settings.size==.75&&IsWindow(popup));
     HWND tail=GetDlgItem(popup,dog::menu::TailChoice);assert(tail);
     SendMessageW(tail,CB_SETCURSEL,1,0);SendMessageW(popup,WM_COMMAND,MAKEWPARAM(dog::menu::TailChoice,CBN_SELCHANGE),LPARAM(tail));

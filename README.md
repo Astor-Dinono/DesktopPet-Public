@@ -4,22 +4,21 @@
 
 [官网与下载](https://desktop-pet-dog.pages.dev/) · [Mac 安装与更新](https://desktop-pet-dog.pages.dev/install.html) · [Windows 试用版](https://desktop-pet-dog.pages.dev/windows.html)
 
-## Windows build 14 / Mac build 57：打个哈欠，再睡一会儿
+## Mac build 58 / Windows build 15：看得见小狗，也看得清睡眼
 
-1. 睡前打一个大大的哈欠，闭眼后轻轻摇一下尾巴，再安静睡着
-2. 睡着时悬停轻轻摸摸，只会慢慢脸红，不会被叫醒；点击或拖动仍能唤醒
-3. 睡觉的 zzZ 稍微更清楚，依旧轻轻飘出、慢慢淡去
-4. Windows 修复部分电脑更新被版本记录拦住的问题，原有计数与设置继续保留
+1. Mac 与 Windows 的普通闭眼线条，与打完哈欠时的粗细统一
+2. Windows 右键菜单自动避开小狗，切换页面和调整体型时保持避让
+3. 原有计数与设置继续保留
 
-本次 Windows 同步上述睡眠动作，Mac 保持 build 57。Windows 原生显示、互动和完整升级仍待实机确认。
+Mac 本机闭眼效果已查看；Windows 菜单逻辑与交叉构建检查通过，实际界面和完整升级仍待设备反馈
 
 ## 下载与使用
 
-1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 57](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b57-arm64.zip)
-2. Windows 10（1809 或更新）/11，64 位 x64：[下载 Windows build 14 安装程序](https://desktop-pet-dog.pages.dev/updates/DesktopPet-Windows-0.1.0-b14-x64-Setup.exe)
+1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 58](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b58-arm64.zip)
+2. Windows 10（1809 或更新）/11，64 位 x64：[下载 Windows build 15 安装程序](https://desktop-pet-dog.pages.dev/updates/DesktopPet-Windows-0.1.0-b15-x64-Setup.exe)
 3. 已安装的小狗可右键 → 更多 → 检查更新，确认后下载安装，保留原计数和设置
 4. Mac 当前为开发签名测试版，尚未完成 Developer ID 签名与公证；Windows 安装包尚无 Authenticode 代码签名，首次打开可能出现系统安全提示，请核对下载来源并自行决定是否运行，无需关闭系统保护
-5. Windows build 14 的哈欠、睡眠悬停摸摸、zzZ 和完整升级尚未完成真实 Windows 设备验收，欢迎小范围试用反馈
+5. Windows build 15 的菜单避让、睡眼粗细和完整升级尚未完成真实 Windows 设备验收，欢迎小范围试用反馈
 
 ## 小狗能做什么
 

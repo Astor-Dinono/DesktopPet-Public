@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include "MenuPainting.hpp"
+#include "MenuPlacement.hpp"
 
 namespace dog {
 // Event-driven, owned Win32 controls: no web runtime, global listener, or menu animation timer.
@@ -15,8 +16,9 @@ class ContextMenu {
     std::function<menu::Snapshot()> read;
     std::function<void(unsigned)> action;
     std::function<void()> didClose;
+    std::function<std::optional<Bounds>()> avoidedBounds;
     menu::Page page=menu::Page::Home;menu::Plan plan;menu::MenuPainting painting;
-    POINT anchor{},origin{};UINT dpi=96;double scale=1;bool rebuilding=false;
+    POINT anchor{},origin{};UINT dpi=96;double scale=1;bool rebuilding=false,placed=false;
     int px(double n)const{return int(std::lround(n*scale));}
     Control* control(int id){for(auto& c:controls)if(c->item.id==id)return c.get();return nullptr;}
     void theme(){
@@ -46,18 +48,25 @@ class ContextMenu {
         // A click may navigate and destroy its old button. Do not touch c after dispatch.
         return CallWindowProcW(original,h,m,w,l);
     }
-    void resize(){
+    void resize(bool updateFont=true){
         MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromPoint(anchor,MONITOR_DEFAULTTONEAREST),&monitor);
         double width=monitor.rcWork.right-monitor.rcWork.left,height=monitor.rcWork.bottom-monitor.rcWork.top;
-        double maxHeight=menu::layout(menu::Page::Home,read()).height;
-        scale=std::min({dpi/96.0,std::max(1.0,width-8)/plan.width,std::max(1.0,height-8)/maxHeight});
+        double maxHeight=0;const auto snapshot=read();
+        for(auto p:{menu::Page::Home,menu::Page::Appearance,menu::Page::Effects,menu::Page::Sleep,menu::Page::Counts,menu::Page::More})maxHeight=std::max(maxHeight,menu::layout(p,snapshot).height);
+        const double nextScale=std::min({dpi/96.0,std::max(1.0,width-8)/plan.width,std::max(1.0,height-8)/maxHeight});
+        if(!updateFont&&std::abs(nextScale-scale)>1e-9){rebuild(false);return;}
+        scale=nextScale;
         int w=px(plan.width),h=px(plan.height);
-        origin.x=std::clamp(origin.x,monitor.rcWork.left,std::max(monitor.rcWork.left,monitor.rcWork.right-w));
-        origin.y=std::clamp(origin.y,monitor.rcWork.top,std::max(monitor.rcWork.top,monitor.rcWork.bottom-h));
+        const auto location=menu::placeMenu({double(anchor.x),double(anchor.y)},w,px(maxHeight),
+            {double(monitor.rcWork.left),double(monitor.rcWork.top),double(monitor.rcWork.right),double(monitor.rcWork.bottom)},
+            avoidedBounds?avoidedBounds():std::nullopt,scale,placed?std::optional<Point>{{double(origin.x),double(origin.y)}}:std::nullopt);
+        origin={LONG(location.x),LONG(location.y)};placed=true;
         SetWindowPos(window,nullptr,origin.x,origin.y,w,h,SWP_NOZORDER|SWP_NOACTIVATE);
         HRGN region=CreateRoundRectRgn(0,0,w+1,h+1,px(36),px(36));if(region&&!SetWindowRgn(window,region,TRUE))DeleteObject(region);
-        if(font)DeleteObject(font);
-        font=CreateFontW(-px(13),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+        if(updateFont){
+            if(font)DeleteObject(font);
+            font=CreateFontW(-px(13),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+        }
     }
     bool rebuild(bool focusFirst=true){
         rebuilding=true;for(auto& c:controls)if(IsWindow(c->window))DestroyWindow(c->window);controls.clear();
@@ -148,6 +157,9 @@ public:
     void close(){if(window)DestroyWindow(window);}
     void refresh(){
         if(!window)return;plan=menu::layout(page,read());
+        // Explicit commands can move/resize the dog while this menu stays open.
+        // Reposition only on these events, never on each animation frame.
+        resize(false);
         for(auto& c:controls)for(const auto& item:plan.items)if(c->item.id==item.id){
             bool changed=c->item.label!=item.label;c->item=item;
             if(changed)SetWindowTextW(c->window,item.label.c_str());
@@ -167,9 +179,10 @@ public:
         if(msg.message==WM_KEYDOWN&&msg.wParam==VK_RETURN){auto c=control(GetDlgCtrlID(GetFocus()));if(c&&c->item.kind!=menu::Kind::Combo&&c->item.kind!=menu::Kind::Label){SendMessageW(c->window,BM_CLICK,0,0);return true;}}
         return IsDialogMessageW(window,&msg)!=FALSE;
     }
-    bool show(HWND owner,POINT point,std::function<menu::Snapshot()> getter,std::function<void(unsigned)> callback,std::function<void()> closed,menu::Page initial=menu::Page::Home){
-        if(window){navigate(initial);SetForegroundWindow(window);return true;}
+    bool show(HWND owner,POINT point,std::function<menu::Snapshot()> getter,std::function<void(unsigned)> callback,std::function<void()> closed,menu::Page initial=menu::Page::Home,std::function<std::optional<Bounds>()> avoid={}){
+        if(window){anchor=point;avoidedBounds=std::move(avoid);placed=false;navigate(initial);SetForegroundWindow(window);return true;}
         anchor=origin=point;read=std::move(getter);action=std::move(callback);didClose=std::move(closed);page=initial;
+        avoidedBounds=std::move(avoid);placed=false;
         plan=menu::layout(page,read());dpi=GetDpiForWindow(owner);theme();
         HINSTANCE instance=reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(owner,GWLP_HINSTANCE));
         WNDCLASSEXW cls{sizeof(cls)};cls.lpfnWndProc=proc;cls.hInstance=instance;cls.lpszClassName=L"DesktopPet.ContextMenu";cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);cls.style=CS_DROPSHADOW;

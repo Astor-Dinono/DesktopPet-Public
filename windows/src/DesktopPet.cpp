@@ -463,11 +463,27 @@ struct App {
         s.effects=settings.effectsMask;s.nap=settings.nap;s.size=settings.size<.56?0:settings.size<.70?1:2;s.tail=int(settings.tailSize);
         s.today=settings.counts.today;s.total=settings.counts.total;return s;
     }
+    std::optional<dog::Bounds> menuAvoidBounds()const{
+        if(!running())return std::nullopt;
+        // Stable animation envelope rather than the transparent square window.
+        // Reserve all angles during a turn; the menu never chases breathing.
+        const double pad=12*settings.size*dpi;
+        auto b=dog::extent(angle,unit());
+        if(turning){const double r=162*settings.size*dpi;
+            const double dx=std::abs(turn.from.velocity.x)*turn.duration+std::abs(turn.excursion.x),
+                         dy=std::abs(turn.from.velocity.y)*turn.duration+std::abs(turn.excursion.y);
+            b={std::min(turn.from.center.x,turn.to.x)-center.x-r-dx,
+               std::min(turn.from.center.y,turn.to.y)-center.y-r-dy,
+               std::max(turn.from.center.x,turn.to.x)-center.x+r+dx,
+               std::max(turn.from.center.y,turn.to.y)-center.y+r+dy};}
+        const double x=std::round(center.x),y=std::round(center.y);
+        return dog::Bounds{x+b.left-pad,y+b.top-pad,x+b.right+pad,y+b.bottom+pad};
+    }
     void menu(POINT point,dog::menu::Page initial=dog::menu::Page::Home){
         operationHint.hide();
         cancelPointer();
         menuOpen=true;
-        bool shown=contextMenu.show(window,point,[this](){return menuSnapshot();},[this](unsigned id){command(id);},[this](){menuOpen=false;lastActivity=now();requestFrame();},initial);
+        bool shown=contextMenu.show(window,point,[this](){return menuSnapshot();},[this](unsigned id){command(id);},[this](){menuOpen=false;lastActivity=now();requestFrame();},initial,[this](){return menuAvoidBounds();});
         if(!shown){menuOpen=false;requestFrame();MessageBoxW(window,L"菜单暂时没有打开，请从托盘重试。",L"小狗桌宠",MB_OK|MB_ICONINFORMATION);}
     }
     void pauseChanged(){

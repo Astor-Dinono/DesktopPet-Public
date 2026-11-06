@@ -346,7 +346,8 @@ enum DogRenderer {
 
     static func eyeOutline(at center: NSPoint, closed: Double) -> NSBezierPath {
         let halfWidth = 5.4 + closed * 0.9
-        let halfHeight = 5.4 * (1 - closed) + closed * 0.65
+        // Match the ~3.04 pt lid thickness at the end of the yawn clip.
+        let halfHeight = 5.4 * (1 - closed) + closed * 1.52
         let sag = -closed * 1.8
         let top = center.y + halfHeight + sag
         let bottom = center.y - halfHeight + sag
