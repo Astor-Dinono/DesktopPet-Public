@@ -15,9 +15,10 @@ import zipfile
 import json
 import base64
 import re
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '0.1.0-b12'
+VERSION = '0.1.0-b14'
 
 def main():
     parser = argparse.ArgumentParser()
@@ -48,6 +49,7 @@ def main():
             print(log.read_text(errors='replace')[-18000:])
             raise SystemExit('Build failed; full log: '+str(log))
     log.write_text('Zig '+version+'\n')
+    run([sys.executable, str(ROOT/'windows/tools/generate_yawn.py'), '--output', str(out/'DogYawnData.hpp')])
     resources = ROOT/'windows'/'resources'
     resource = out/'DesktopPet.res'
     run([zig, 'rc', '/c', '65001', '/fo', str(resource), 'DesktopPet.rc'], resources)
@@ -55,7 +57,7 @@ def main():
     flags=[zig, 'c++', '-target', 'x86_64-windows-gnu', '-std=c++17', '-Os', '-s', '-static',
          '-DWINVER=0x0a00', '-municode', '-Wl,--subsystem,windows',
          '-Wno-nullability-completeness', '-Wno-unused-command-line-argument',
-         '-Wall', '-Wextra', '-Wno-missing-field-initializers']
+         '-Wall', '-Wextra', '-Wno-missing-field-initializers', '-I', str(out)]
     libraries=['-lgdiplus','-luser32','-lgdi32','-lshell32','-lole32','-lwtsapi32','-luuid','-ladvapi32']
     run(flags+[
          str(ROOT/'windows'/'src'/'DesktopPet.cpp'), str(resource)]+libraries+[
@@ -72,7 +74,7 @@ def main():
     setup_resource=out/'Setup.res'
     run([zig,'rc','/c','65001','/fo',str(setup_resource),str(setup_rc)],resources)
     installer=out/('DesktopPet-Windows-'+VERSION+'-x64-Setup.exe')
-    run(flags+[str(ROOT/'windows/src/Setup.cpp'),str(setup_resource)]+libraries+['-o',str(installer)])
+    run(flags+[str(ROOT/'windows/src/Setup.cpp'),str(setup_resource)]+libraries+['-lversion','-o',str(installer)])
     archive = out/('DesktopPet-Windows-'+VERSION+'-x64.zip')
     with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
         for file in sorted(package.iterdir()):

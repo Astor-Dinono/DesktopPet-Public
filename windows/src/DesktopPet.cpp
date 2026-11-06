@@ -24,6 +24,8 @@
 #include "StrokeGesture.hpp"
 #include "HoverStrokeGesture.hpp"
 #include "PetExpression.hpp"
+#include "YawnMotion.hpp"
+#include "YawnDrawing.hpp"
 #include "SqueezeEyes.hpp"
 #include "OperationHint.hpp"
 
@@ -101,7 +103,8 @@ struct App {
     HINSTANCE instance;HWND window=nullptr,effects=nullptr;HANDLE timer=nullptr;HPOWERNOTIFY displayNotification=nullptr;UINT taskbarCreated=0;bool trayAdded=false,displayOff=false,saveWarningShown=false,fxShown=false;
     Settings settings;Surface surface,fx;dog::Tail tail;dog::Duang duang;dog::Rest rest;dog::Blush blush;dog::Hearts hearts;dog::Turn turn;dog::Updater updater;
     dog::ContextMenu contextMenu;dog::HeldKeys heldKeys;
-    dog::StrokeGesture stroke;dog::HoverStrokeGesture hoverStroke;dog::PetExpression petExpression;
+    dog::StrokeGesture stroke;dog::HoverStrokeGesture hoverStroke;dog::PetExpression petExpression;dog::YawnMotion yawn;
+    std::unique_ptr<dog::YawnDrawing> yawnDrawing;
     dog::OperationHint operationHint;dog::OperationHintState hintState;
     GraphicsPath petHitPath{FillModeWinding},petHitClip,earFill{FillModeWinding};bool petHitReady=false,pressIsStroke=false,pressOnPet=false;
     double lastStrokeEffect=-100,lastStrokeDuang=-100;
@@ -140,12 +143,18 @@ struct App {
         LARGE_INTEGER due;due.QuadPart=-LONGLONG(std::max(.0001,nextFrame-now())*10000000);
         SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE);
     }
-    bool fast(double t)const{return !reduced&&(turning||(pressed&&!pressIsStroke)||tail.moving(t)||duang.moving(t)||rest.moving(t)||petExpression.moving(t)||countFade.moving(t)||!hearts.items.empty());}
+    bool fast(double t)const{return !reduced&&(turning||(pressed&&!pressIsStroke)||tail.moving(t)||duang.moving(t)||rest.moving(t)||yawn.moving(t)||t-blush.started<2.6||petExpression.moving(t)||countFade.moving(t)||!hearts.items.empty());}
     void activity(bool wag){
         double t=now();lastActivity=t;
-        if(running()&&!dragging){rest.setSleep(false,t);if(wag)tail.wag(t);requestFrame();}
+        if(running()&&!dragging){if(rest.sleeping)yawn.cancel(t);rest.setSleep(false,t);if(wag)tail.wag(t);requestFrame();}
     }
-    void setNap(bool sleeping){double t=now();rest.setSleep(sleeping,t);if(sleeping){hoverStroke.cancel();operationHint.hide();tail.settle(t);petExpression.clear();hearts.items.clear();}else lastActivity=t;requestFrame();}
+    void setNap(bool sleeping,double t){
+        if(rest.sleeping==sleeping){if(!sleeping)lastActivity=t;return;}
+        if(sleeping){yawn.start(t);hoverStroke.cancel();operationHint.hide();tail.settle(t);petExpression.clear();hearts.items.clear();if(duang.moving(t))duang.kick(t,0);}
+        else{yawn.cancel(t);lastActivity=t;}
+        rest.setSleep(sleeping,t);requestFrame();
+    }
+    void setNap(bool sleeping){setNap(sleeping,now());}
     void updateOperationHint(dog::Bounds petBounds,dog::Bounds badgeBounds){
         if(!hintState.available(running(),rest.sleeping,menuOpen,pressed,turning)){operationHint.hide();return;}
         auto placement=dog::operationHintPlacement(petBounds,badgeBounds,work(),dpi,operationHint.currentPlacement());
@@ -156,7 +165,8 @@ struct App {
     }
     void touchEffect(dog::Point p,double t){auto kind=effectPicker.next(settings.effectsMask,[&](unsigned n){return std::uniform_int_distribution<unsigned>(0,n-1)(effectRandom);});if(kind)hearts.add(p,t,*kind);}
     void pet(dog::Point p){activity(false);double t=now();duang.kick(t,.75);blush.touch(t);if(!reduced)tail.wag(t);touchEffect(p,t);requestFrame();}
-    void strokePet(dog::Point p,double t){
+    void strokePet(dog::Point p,double t,bool fromHover=false){
+        if(fromHover&&rest.sleeping){blush.touch(t);requestFrame();return;}
         activity(false);blush.touch(t);petExpression.touch(t);if(!reduced)tail.wag(t);
         // Sustain the expression; keep repeated squashes and floating marks sparse.
         if(t-lastStrokeDuang>=.65){duang.kick(t,.22);lastStrokeDuang=t;}
@@ -180,7 +190,7 @@ struct App {
         return buttonsDown||pressed||dragging||menuOpen||turning||!running();
     }
     void moveHover(dog::Point p,double t,bool buttonsDown){
-        if(hoverStroke.move(p*(1/dpi),t,hitsPet(p),hoverBlocked(buttonsDown)))strokePet(p,t);
+        if(hoverStroke.move(p*(1/dpi),t,hitsPet(p),hoverBlocked(buttonsDown)))strokePet(p,t,true);
     }
     void validateHover(dog::Point p,double t,bool buttonsDown,bool overWindow){
         // Existing frames only validate/arm the dwell. They never accumulate
@@ -267,7 +277,7 @@ struct App {
         clearSelection();if(!value)contextMenu.close();
         visible=value;selected=false;hover=false;pressed=false;dragging=false;hearts.items.clear();
         if(value){center=dog::fit(center,dog::extent(angle,unit()),work());lastActivity=now();ShowWindow(window,SW_SHOWNOACTIVATE);requestFrame();}
-        else{ShowWindow(window,SW_HIDE);ShowWindow(effects,SW_HIDE);fxShown=false;CancelWaitableTimer(timer);save();}
+        else{yawn.clear();ShowWindow(window,SW_HIDE);ShowWindow(effects,SW_HIDE);fxShown=false;CancelWaitableTimer(timer);save();}
     }
     void fit(){center=dog::fit(center,dog::extent(angle,unit()),work());markDirty();requestFrame();}
     void clearSelection(){selected=false;dog::passiveWindow(window,true);}
@@ -307,23 +317,28 @@ struct App {
         for(int i=0;i<12;i+=3)p.AddBezier(pf(transform(pts[i])),pf(transform(pts[i+1])),pf(transform(pts[i+2])),pf(transform(pts[i+3])));
         p.CloseFigure();SolidBrush brush(fill);g.FillPath(&brush,&p);
     }
-    void text(Graphics& g,const wchar_t* value,double x,double y,double size,Color color,bool bold=false){FontFamily family(L"Segoe UI");Font font(&family,REAL(size),bold?FontStyleBold:FontStyleRegular,UnitPixel);SolidBrush brush(color);g.DrawString(value,-1,&font,PointF(REAL(x),REAL(y)),&brush);}
+    void text(Graphics& g,const wchar_t* value,double x,double y,double size,Color color){FontFamily semibold(L"Segoe UI Semibold"),fallback(L"Segoe UI");bool hasSemibold=semibold.GetLastStatus()==Ok;Font font(hasSemibold?&semibold:&fallback,REAL(size),hasSemibold?FontStyleRegular:FontStyleBold,UnitPixel);SolidBrush brush(color);g.DrawString(value,-1,&font,PointF(REAL(x),REAL(y)),&brush);}
     bool draw(double t){
         radius=int(std::ceil(162*settings.size*dpi+8*dpi));fxPad=int(std::ceil(48*dpi));int side=radius*2;
         if(!surface.resize(side,side))return false;
         int left=int(std::lround(center.x))-radius,top=int(std::lround(center.y))-radius;windowRect={left,top,left+side,top+side};
         auto& g=*surface.graphics;g.Clear(Color(0,0,0,0));
-        auto restPose=rest.pose(t);double breath=reduced?0:std::sin(t*2*dog::pi/4.6)*(1+restPose.settle*.35),squash=reduced?0:duang.value(t);
+        auto restPose=rest.pose(t);const double decoration=reduced?1:yawn.sleepDecorationAmount(t);restPose.bubble*=decoration;restPose.letters*=decoration;
+        double breath=reduced?0:std::sin(t*2*dog::pi/4.6)*(1+restPose.settle*.35),squash=reduced?0:duang.value(t);
         double sx=1-breath*.012+squash*.48+restPose.settle*.010-restPose.stretch*.4,sy=1+breath*.040-squash-restPose.settle*.025+restPose.stretch;
+        const auto yawnPose=reduced?std::nullopt:yawn.pose(t);
+        const double yawnTime=yawnPose?yawnPose->time:0,yawnWeight=yawnPose?yawnPose->weight:0;
+        restPose.letters*=1-yawnWeight;
+        const auto headPose=dog::blendedYawnHead(yawnTime,yawnWeight,sx,sy);sx=headPose.sx;sy=headPose.sy;
         auto project=[&](dog::Point p){return dog::rotated((p-dog::pivot)*unit(),angle)+dog::Point{double(radius),double(radius)};};
-        auto headTransform=[&](dog::Point p){return project({305+(p.x-305)*sx,268+(p.y-268)*sy});};
+        auto headTransform=[&](dog::Point p){return project(headPose.apply(p));};
         auto faceTransform=[&](dog::Point p){p.y+=restPose.settle*1.1/dog::sourceScale;return headTransform(p);};
         PointF clipPoints[4]={pf(project({-100,-1000})),pf(project({850,-1000})),pf(project({850,268})),pf(project({-100,268}))};GraphicsPath clip;clip.AddPolygon(clipPoints,4);g.SetClip(&clip);
         const bool wantsHint=hintState.available(running(),rest.sleeping,menuOpen,pressed,turning);
         dog::Bounds hintPetBounds{},hintBadgeBounds{};
         petHitReady=false;
         petHitPath.Reset();petHitPath.SetFillMode(FillModeWinding);petHitClip.Reset();petHitClip.AddPath(&clip,FALSE);
-        auto tailPose=tail.pose(t,reduced);auto tailTransform=[&](dog::Point p){return project(dog::bendTail(p,tailPose,settings.tailSize));};
+        auto tailPose=tail.pose(t,reduced);auto tailTransform=[&](dog::Point p){return project(dog::blendedYawnTailPoint(p,yawnTime,yawnWeight,tailPose,settings.tailSize));};
         Color ink(255,0,0,0),white(255,255,255,255);
         GraphicsPath* hit=&petHitPath;
         path(g,tailShape,tailTransform,ink,dog::outlineWidth*unit(),white,nullptr,hit);path(g,head,headTransform,ink,dog::outlineWidth*unit(),white,nullptr,hit);
@@ -343,17 +358,23 @@ struct App {
             Matrix transform(REAL(c*u*sx),REAL(sn*u*sx),REAL(-sn*u*sy),REAL(c*u*sy),REAL(origin.x),REAL(origin.y));
             auto saved=g.Save();g.MultiplyTransform(&transform);SolidBrush fill(ink);g.FillPath(&fill,&earFill);g.Restore(saved);
         }
-        path(g,mouth,faceTransform,ink,dog::mouthWidth*unit());ellipse(g,faceTransform,{285,206},17.57,10.95,ink);
+        auto drawNormalFace=[&](Graphics& faceGraphics){
+        path(faceGraphics,mouth,faceTransform,ink,dog::mouthWidth*unit());ellipse(faceGraphics,faceTransform,{285,206},17.57,10.95,ink);
         double closed=1-(1-restPose.closed)*(1-dog::blink(t,reduced));
         double happy=petExpression.value(t)*(1-restPose.closed);if(reduced)happy=happy>.05?1:0;
         auto drawEye=[&](dog::Point p,bool leftEye){
             auto eye=dog::squeezeEye(p,leftEye,closed,happy);
-            if(eye.normalAlpha>0)path(g,eye.normal,faceTransform,ink,0,Color(alpha(eye.normalAlpha),0,0,0));
-            if(eye.squeezeAlpha>0)path(g,eye.squeeze,faceTransform,Color(alpha(eye.squeezeAlpha),0,0,0),eye.strokeWidth*unit());
+            if(eye.normalAlpha>0)path(faceGraphics,eye.normal,faceTransform,ink,0,Color(alpha(eye.normalAlpha),0,0,0));
+            if(eye.squeezeAlpha>0)path(faceGraphics,eye.squeeze,faceTransform,Color(alpha(eye.squeezeAlpha),0,0,0),eye.strokeWidth*unit());
         };
         drawEye({200,198},true);drawEye({398,218},false);
-        Color cheek(alpha(blush.value(t)*.36),255,128,153);ellipse(g,faceTransform,{164,228},26.5,9.5,cheek);ellipse(g,faceTransform,{438,244},26.5,9.5,cheek);
-        if(restPose.bubble>.001){double growth=(reduced?1:restPose.bubble)*(1+breath*.09);auto bubbleTransform=[&](dog::Point p){return faceTransform({301+p.x*growth/dog::sourceScale,208+p.y*growth/dog::sourceScale});};path(g,bubble,bubbleTransform,Color(alpha(restPose.bubble*.65),102,158,184),.85*settings.size*dpi*(reduced?1:restPose.bubble),Color(alpha(restPose.bubble*.35),209,237,255));static auto glint=dog::parsePath("M9 12 C8 10 9 8 10 8");path(g,glint,bubbleTransform,Color(alpha(restPose.bubble*.8),255,255,255),1.4*settings.size*dpi*(reduced?1:restPose.bubble));}
+        Color cheek(alpha(blush.value(t)*.36),255,128,153);ellipse(faceGraphics,faceTransform,{164,228},26.5,9.5,cheek);ellipse(faceGraphics,faceTransform,{438,244},26.5,9.5,cheek);
+        if(restPose.bubble>.001){double growth=(reduced?1:restPose.bubble)*(1+breath*.09);auto bubbleTransform=[&](dog::Point p){return faceTransform({301+p.x*growth/dog::sourceScale,208+p.y*growth/dog::sourceScale});};path(faceGraphics,bubble,bubbleTransform,Color(alpha(restPose.bubble*.65),102,158,184),.85*settings.size*dpi*(reduced?1:restPose.bubble),Color(alpha(restPose.bubble*.35),209,237,255));static auto glint=dog::parsePath("M9 12 C8 10 9 8 10 8");path(faceGraphics,glint,bubbleTransform,Color(alpha(restPose.bubble*.8),255,255,255),1.4*settings.size*dpi*(reduced?1:restPose.bubble));}
+        };
+        if(yawnWeight>0){
+            if(!yawnDrawing)yawnDrawing=std::make_unique<dog::YawnDrawing>();
+            if(!yawnDrawing->drawFaces(g,side,clip,yawnTime,yawnWeight,headTransform,drawNormalFace))return false;
+        }else drawNormalFace(g);
         g.ResetClip();Pen baseline(ink,REAL(2.5*settings.size*dpi));baseline.SetStartCap(LineCapRound);baseline.SetEndCap(LineCapRound);g.DrawLine(&baseline,pf(project(dog::baselineStart)),pf(project(dog::baselineEnd)));
         bool countWanted=settings.counts.enabled&&(settings.always||hover);countFade.set(countWanted?1:0,t);double countAlpha=reduced?(countWanted?1:0):countFade.value(t);
         if(countAlpha>.001){
@@ -373,10 +394,10 @@ struct App {
         if(!fx.resize(side+2*fxPad,side+2*fxPad))return false;
         auto& f=*fx.graphics;f.Clear(Color(0,0,0,0));
         if(restPose.letters>.001){for(int i=0;i<3;++i){
-            double phase=std::fmod(restPose.phaseAge/4.8+i/3.0,1.0),drift=reduced?0:phase*25,fontSize=(12+i*3)*settings.size*dpi;
+            double phase=std::fmod(restPose.phaseAge/4.8+i/3.0,1.0),drift=reduced?0:phase*25,fontSize=(12+i*3)*1.08*settings.size*dpi;
             auto p=project({(164+i*12)/dog::sourceScale,268-(70+i*14+drift-3.8)/dog::sourceScale});
             auto saved=f.Save();Matrix transform(REAL(std::cos(angle)),REAL(std::sin(angle)),REAL(-std::sin(angle)),REAL(std::cos(angle)),REAL(p.x+fxPad),REAL(p.y+fxPad));f.SetTransform(&transform);
-            text(f,i==2?L"Z":L"z",0,-fontSize*1.25,fontSize,Color(alpha(std::sin(phase*dog::pi)*restPose.letters*.42),102,94,88));f.Restore(saved);
+            text(f,i==2?L"Z":L"z",0,-fontSize*1.25,fontSize,Color(alpha(std::sin(phase*dog::pi)*restPose.letters*.56),102,94,88));f.Restore(saved);
         }}
         for(auto h:hearts.items){auto pose=dog::effectPose(h,t,reduced);double scale=pose.scale*dpi;
             dog::Point origin{h.origin.x-left+fxPad+(pose.origin.x-h.origin.x)*dpi,h.origin.y-top+fxPad+(pose.origin.y-h.origin.y)*dpi};
@@ -393,7 +414,7 @@ struct App {
         double t=now();if(!running()){schedule();return;}lastFrame=t;
         if(settings.counts.roll(date()))markDirty();
         if(turning){auto p=turn.pose(t);center=p.center;angle=p.angle;if(!turn.moving(t)){turning=false;angle=std::fmod(angle,2*dog::pi);markDirty();}}
-        if(!pressed&&!menuOpen&&settings.nap&&t-lastActivity>=settings.nap&&!rest.sleeping)setNap(true);
+        if(!pressed&&!menuOpen&&settings.nap&&t-lastActivity>=settings.nap&&!rest.sleeping)setNap(true,lastActivity+settings.nap);
         hearts.expire(t);
         if(!draw(t)){if(++frameFailures>=3){show(false);MessageBoxW(nullptr,L"小狗暂时无法绘制，请从托盘重新显示，或退出后再试。",L"小狗桌宠",MB_OK|MB_ICONWARNING);return;}}else{
             frameFailures=0;
@@ -454,7 +475,7 @@ struct App {
         cancelPointer();petExpression.clear();
         clearSelection();contextMenu.close();
         selected=false;pressed=false;dragging=false;hover=false;hearts.items.clear();registerInput();
-        if(!running()){CancelWaitableTimer(timer);ShowWindow(effects,SW_HIDE);fxShown=false;save();}
+        if(!running()){yawn.clear();CancelWaitableTimer(timer);ShowWindow(effects,SW_HIDE);fxShown=false;save();}
         else{lastActivity=now();requestFrame();}
     }
     LRESULT message(UINT m,WPARAM w,LPARAM l){
@@ -502,7 +523,7 @@ struct App {
         }
         return DefWindowProcW(window,m,w,l);
     }
-    void registerShutdown(){operationHint.destroy();hintState.dismiss();cancelPointer();heldKeys.clear();contextMenu.close();callbackWindow.store(nullptr);RAWINPUTDEVICE d[2]={{1,6,RIDEV_REMOVE,nullptr},{1,2,RIDEV_REMOVE,nullptr}};RegisterRawInputDevices(d,2,sizeof(RAWINPUTDEVICE));WTSUnRegisterSessionNotification(window);if(displayNotification)UnregisterPowerSettingNotification(displayNotification);removeTray();if(timer)CancelWaitableTimer(timer);if(effects)DestroyWindow(effects);}
+    void registerShutdown(){operationHint.destroy();hintState.dismiss();cancelPointer();yawn.clear();heldKeys.clear();contextMenu.close();callbackWindow.store(nullptr);RAWINPUTDEVICE d[2]={{1,6,RIDEV_REMOVE,nullptr},{1,2,RIDEV_REMOVE,nullptr}};RegisterRawInputDevices(d,2,sizeof(RAWINPUTDEVICE));WTSUnRegisterSessionNotification(window);if(displayNotification)UnregisterPowerSettingNotification(displayNotification);removeTray();if(timer)CancelWaitableTimer(timer);if(effects)DestroyWindow(effects);}
     static LRESULT CALLBACK proc(HWND h,UINT m,WPARAM w,LPARAM l){
         App* app=reinterpret_cast<App*>(GetWindowLongPtrW(h,GWLP_USERDATA));
         if(m==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);app->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,LONG_PTR(app));}

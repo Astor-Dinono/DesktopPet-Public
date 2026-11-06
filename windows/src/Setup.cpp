@@ -7,6 +7,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <winver.h>
 #include <string>
 #include <vector>
 #include "InstallPlan.hpp"
@@ -31,6 +32,23 @@ std::wstring read(const std::wstring& p){
     std::wstring s(size_t(n.QuadPart/2),L'\0');DWORD got=0;bool ok=ReadFile(f,s.data(),DWORD(n.QuadPart),&got,nullptr)&&got==n.QuadPart;CloseHandle(f);return ok?s:std::wstring();
 }
 bool managed(const std::wstring& p){return plainDirectory(p)&&read(join(p,L".desktop-pet-install"))==marker;}
+std::optional<dog::InstallVersion> installedExecutableVersion(const std::wstring& path){
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if(attributes == INVALID_FILE_ATTRIBUTES || (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+        return std::nullopt;
+    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), nullptr);
+    if(size == 0 || size > 1024 * 1024) return std::nullopt;
+    std::vector<BYTE> data(size);
+    if(!GetFileVersionInfoW(path.c_str(), 0, size, data.data())) return std::nullopt;
+    void* value = nullptr;
+    UINT length = 0;
+    if(!VerQueryValueW(data.data(), L"\\", &value, &length) || !value || length < sizeof(VS_FIXEDFILEINFO))
+        return std::nullopt;
+    const auto& version = *static_cast<const VS_FIXEDFILEINFO*>(value);
+    if(version.dwSignature != VS_FFI_SIGNATURE || version.dwFileType != VFT_APP) return std::nullopt;
+    return dog::InstallVersion{HIWORD(version.dwFileVersionMS), LOWORD(version.dwFileVersionMS),
+                               HIWORD(version.dwFileVersionLS), LOWORD(version.dwFileVersionLS)};
+}
 // Delete only the fixed files of our own marked, non-reparse backup directory.
 // Extra user files prevent cleanup; they are never recursively deleted.
 bool removeBackup(const std::wstring& p){
@@ -94,8 +112,17 @@ int install(HINSTANCE instance,bool update){
     }
     bool hadOld=exists(root);
     if(hadOld&&!managed(root))return error(L"安装位置已有其他文件，为了保留它们，本次安装已停止。请联系邀请你试用的人。");
-    std::wstring oldVersion=hadOld?read(join(root,L"version.txt")):L"";
-    if(!dog::mayInstall(oldVersion,dog::version))return error(L"当前已安装更新的小狗，或版本记录异常；本次不会覆盖它。");
+    const auto oldVersion = hadOld ? read(join(root, L"version.txt")) : L"";
+    const auto exeVersion = hadOld ? installedExecutableVersion(join(root, L"DesktopPet.exe")) : std::nullopt;
+    switch(dog::checkInstallVersion(hadOld, oldVersion, exeVersion, dog::version)){
+        case dog::InstallDecision::Proceed: break;
+        case dog::InstallDecision::NewerInstalled:
+            return error(L"电脑上已有较新版的小狗，本次未替换。请从开始菜单打开“小狗桌宠”。");
+        case dog::InstallDecision::UnknownInstalledVersion:
+            return error(L"无法确认现有小狗的版本，本次未替换程序。请从开始菜单打开“小狗桌宠”，并将此提示反馈给邀请你试用的人。");
+        case dog::InstallDecision::InvalidTargetVersion:
+            return error(L"安装包的版本信息异常，请从官网重新下载。原小狗没有改变。");
+    }
     if(exists(backup)&&!removeBackup(backup))return error(L"上一版备份包含额外文件或正在使用，已保留备份和当前小狗，请稍后再试。");
     GUID id{};if(FAILED(CoCreateGuid(&id)))return error(L"暂时无法准备安装位置，原小狗没有改变。");wchar_t guid[40]{};StringFromGUID2(id,guid,40);std::wstring stage=root+L".staging-"+guid;
     if(!CreateDirectoryW(stage.c_str(),nullptr))return error(L"无法准备安装文件，当前小狗和计数没有改变。");

@@ -71,7 +71,20 @@ int main(){
         auto small=dog::bendTail({677,181},pose,dog::TailSize::Small),original=dog::bendTail({677,181},pose,dog::TailSize::Original);
         close(small.x-574,(original.x-574)*.8);close(small.y-280,(original.y-280)*.8);
     }
-    assert(dog::mayInstall(L"",L"0.1.0.2"));assert(dog::mayInstall(L"0.1.0.1",L"0.1.0.2"));assert(dog::mayInstall(L"0.1.0.2",L"0.1.0.2"));assert(!dog::mayInstall(L"0.1.0.3",L"0.1.0.2"));
+    using dog::InstallDecision;
+    using dog::checkInstallVersion;
+    const auto exe12 = dog::parseVersion(L"0.1.0.12");
+    const auto exe14 = dog::parseVersion(L"0.1.0.14");
+    assert(checkInstallVersion(false,L"",std::nullopt,L"0.1.0.13")==InstallDecision::Proceed);
+    assert(checkInstallVersion(true,L"0.1.0.9",std::nullopt,L"0.1.0.13")==InstallDecision::Proceed);
+    assert(checkInstallVersion(true,L"0.1.0.12",exe12,L"0.1.0.12")==InstallDecision::Proceed);
+    assert(checkInstallVersion(true,L"\uFEFF0.1.0.12\r\n",exe12,L"0.1.0.13")==InstallDecision::Proceed);
+    assert(checkInstallVersion(true,L"",exe12,L"0.1.0.13")==InstallDecision::Proceed);
+    assert(checkInstallVersion(true,L"0.1.0.12",exe14,L"0.1.0.13")==InstallDecision::NewerInstalled);
+    assert(checkInstallVersion(true,L"0.1.0.14",exe12,L"0.1.0.13")==InstallDecision::NewerInstalled);
+    assert(checkInstallVersion(true,L"",std::nullopt,L"0.1.0.13")==InstallDecision::UnknownInstalledVersion);
+    assert(checkInstallVersion(true,L"damaged",std::nullopt,L"0.1.0.13")==InstallDecision::UnknownInstalledVersion);
+    assert(checkInstallVersion(false,L"",std::nullopt,L"invalid")==InstallDecision::InvalidTargetVersion);
     for(auto invalid:{L"../0.1.0.2",L"0.1.0.2/",L"0.1.0.-2",L"0.1.0.2.3",L"0.1.0",L"0.1.00.2",L"0.1.0.9999999999999",L"0.1.0.2\r\n"})assert(!dog::parseVersion(invalid));
     dog::Fade fade;fade.set(1,0);double shown=fade.value(.05);fade.set(0,.05);close(fade.value(.05),shown);close(fade.value(.3),0);
     std::cout<<"PASS: continuity, interrupted sleep/turns, screen bounds, bounded effects, privacy-default counts, rollover, overflow, vector paths\n";
