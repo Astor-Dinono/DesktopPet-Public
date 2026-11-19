@@ -341,7 +341,8 @@ enum DogYawnArtwork {
             .scaledBy(x: scale, y: scale)
     }
 
-    static func draw(in context: CGContext, size: NSSize, time: Double, tailSize: DogTailSize = .small) {
+    static func draw(in context: CGContext, size: NSSize, time: Double, tailSize: DogTailSize = .small,
+                     accessory: DogAccessory = .none) {
         guard let artwork, let placement = placement(size: size) else { return }
         let frame = artwork.frames[frameIndex(at: time)], tail = tail(at: time, size: tailSize)
         context.saveGState()
@@ -365,6 +366,12 @@ enum DogYawnArtwork {
         context.setFillColor(black)
         context.addPath(frame.ears)
         context.fillPath(using: .evenOdd)
+        if accessory != .none {
+            context.saveGState()
+            context.concatenate(frame.headTransform)
+            DogAccessoryRenderer.draw(accessory, in: context)
+            context.restoreGState()
+        }
         context.setFillColor(faceColor)
         context.addPath(frame.face)
         context.fillPath(using: .evenOdd)
@@ -420,18 +427,18 @@ enum DogYawnArtwork {
     /// changes opacity, so the outer rim and ear creases cannot form double edges.
     static func drawBlended(in context: CGContext, size: NSSize, time: Double, tailSize: DogTailSize,
                             weight: Double, normalPose: PetPose, normalAngle: Double, normalBend: Double,
-                            blink: Double, petting: Double) {
+                            blink: Double, petting: Double, accessory: DogAccessory = .none) {
         guard let artwork, let placement = placement(size: size) else { return }
         let weight = weight.isFinite ? min(1, max(0, weight)) : 0
         if weight >= 1 {
-            draw(in: context, size: size, time: time, tailSize: tailSize)
+            draw(in: context, size: size, time: time, tailSize: tailSize, accessory: accessory)
             return
         }
         if weight <= 0 {
             var normal = normalPose
             normal.yawn = nil
             DogRenderer.draw(in: context, size: size, pose: normal, angle: normalAngle,
-                bend: normalBend, blink: blink, tailSize: tailSize, petting: petting)
+                bend: normalBend, blink: blink, tailSize: tailSize, petting: petting, accessory: accessory)
             return
         }
         let frame = artwork.frames[frameIndex(at: time)]
@@ -460,6 +467,12 @@ enum DogYawnArtwork {
         context.setFillColor(black)
         context.addPath(ears)
         context.fillPath(using: .evenOdd)
+        if accessory != .none {
+            context.saveGState()
+            context.concatenate(headTransform)
+            DogAccessoryRenderer.draw(accessory, in: context)
+            context.restoreGState()
+        }
 
         // Each complete face is weighted once, then added in an isolated layer.
         // This keeps overlapping black features dark instead of blending twice

@@ -75,6 +75,10 @@ int main(){
     HWND tail=GetDlgItem(popup,dog::menu::TailChoice);assert(tail);
     SendMessageW(tail,CB_SETCURSEL,1,0);SendMessageW(popup,WM_COMMAND,MAKEWPARAM(dog::menu::TailChoice,CBN_SELCHANGE),LPARAM(tail));
     assert(app.settings.tailSize==dog::TailSize::Original);
+    HWND accessory=GetDlgItem(popup,dog::menu::AccessoryChoice);assert(accessory);
+    assert(SendMessageW(accessory,CB_GETCOUNT,0,0)==3);
+    SendMessageW(accessory,CB_SETCURSEL,2,0);SendMessageW(popup,WM_COMMAND,MAKEWPARAM(dog::menu::AccessoryChoice,CBN_SELCHANGE),LPARAM(accessory));
+    assert(app.settings.accessory==dog::Accessory::Collar&&IsWindow(popup));checkMenuPlacement();
     click(dog::menu::Back);click(dog::menu::Sleep);click(Nap300);assert(app.settings.nap==300&&IsWindow(popup));
     click(dog::menu::Back);click(dog::menu::Counts);click(Always);assert(app.settings.always&&IsWindow(popup));
     MSG escape{};escape.hwnd=GetFocus();escape.message=WM_KEYDOWN;escape.wParam=VK_ESCAPE;
@@ -90,6 +94,7 @@ int main(){
     assert(GetPrivateProfileIntW(L"Dog",L"TailSize",0,app.settings.file.c_str())==100);
     assert(GetPrivateProfileIntW(L"Dog",L"AutoNap",0,app.settings.file.c_str())==300);
     assert(GetPrivateProfileIntW(L"Dog",L"AlwaysShow",0,app.settings.file.c_str())==1);
+    assert(GetPrivateProfileIntW(L"Dog",L"Accessory",0,app.settings.file.c_str())==2);
     DeleteFileW(app.settings.file.c_str());DeleteFileW((app.settings.file+L".tmp").c_str());assert(RemoveDirectoryW(name));
     }
     GdiplusShutdown(token);

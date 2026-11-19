@@ -1,6 +1,13 @@
 # Windows 小狗桌宠
 
-Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 16，Mac 为 build 60。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
+Windows 10（1809 或更新）/11 x64 的原生 Win32 / GDI+ 实现，当前源码版本为 build 17，Mac 为 build 61。日常使用请从[官网](https://desktop-pet-dog.pages.dev/windows.html)下载安装程序；以下说明供本地构建使用。
+
+## build 17 登录时自动启动
+
+1. 右键小狗 → 更多 → 登录时自动启动。开关默认关闭，选择后对当前账户生效。若 Windows 已禁用，可从菜单打开系统启动设置，或选择移除启动项
+2. 可在外观与摆放选择小围巾、细项圈或无。点击后拖动、摸摸后打盹以及短时间内醒来再睡的动作衔接已调整
+3. 移动免安装版后，从新位置打开小狗并重新选择自启。卸载前先从小狗菜单关闭或移除启动项
+4. tests/LoginStartupTests.cpp 在独立临时注册表子树中检查开关、系统禁用、程序位置变动和异常数据。真实注销再登录与完整升级仍待实机反馈
 
 ## build 16：睡眼和摸摸，衔接更自然
 
@@ -55,8 +62,8 @@ python3 windows/build.py --zig /path/to/zig --winsparkle-dir /path/to/WinSparkle
 输出在仓库的 build/windows：
 
 1. DesktopPet-Windows：应用、WinSparkle DLL 和随包说明
-2. DesktopPet-Windows-0.1.0-b14-x64.zip：免安装文件归档
-3. DesktopPet-Windows-0.1.0-b14-x64-Setup.exe：当前账户安装程序
+2. DesktopPet-Windows-0.1.0-b17-x64.zip：免安装文件归档
+3. DesktopPet-Windows-0.1.0-b17-x64-Setup.exe：当前账户安装程序
 4. compile.log：构建日志
 
 构建脚本会将共享资源 Sources/DesktopPet/Resources/DogYawn.json 的 97 帧矢量数据转换为 build/windows/DogYawnData.hpp；生成文件只含运行时绘图数据，不增加运行时依赖。
@@ -68,7 +75,7 @@ python3 windows/build.py --zig /path/to/zig --winsparkle-dir /path/to/WinSparkle
 1. 构建后可静态检查 PE、图标、权限声明、DLL、归档白名单及安装器嵌入载荷：
 
 ~~~sh
-python3 windows/audit.py build/windows/DesktopPet-Windows-0.1.0-b14-x64.zip
+python3 windows/audit.py build/windows/DesktopPet-Windows-0.1.0-b17-x64.zip
 ~~~
 
 2. tests/CoreTests.cpp、HeldKeysTests.cpp、MenuModelTests.cpp、OperationHintModelTests.cpp、PetExpressionTests.cpp、SqueezeEyesTests.cpp、StrokeGestureTests.cpp、HoverStrokeGestureTests.cpp 和 YawnMotionTests.cpp 是无需 Windows UI 的 C++17 测试，可用 Clang 或 Zig 在主机编译运行。例如：

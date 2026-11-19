@@ -32,6 +32,25 @@ final class DuangAndNapTests: XCTestCase {
         }
     }
 
+    func testStartingAndCancellingDragPreserveTheCurrentBounceAndVelocity() {
+        for time in [0.03, 0.065, 0.16, 0.4, 0.95] {
+            for cancel in [false, true] {
+                var motion = PetMotion(now: 0)
+                motion.click(now: 0)
+                let epsilon = 0.000001
+                let previous = motion.pose(now: time - epsilon).squash
+                let before = motion.pose(now: time).squash
+                if cancel { motion.cancelDrag(now: time) }
+                else { motion.beginDrag(now: time) }
+                let after = motion.pose(now: time).squash
+                let next = motion.pose(now: time + epsilon).squash
+                XCTAssertEqual(after, before, accuracy: 1e-12)
+                XCTAssertEqual((before - previous) / epsilon, (next - after) / epsilon, accuracy: 0.001)
+                XCTAssertEqual(motion.pose(now: time + DuangMotion.duration).squash, 0)
+            }
+        }
+    }
+
     func testRapidClicksStayBoundedAndReducedMotionRemainsStill() {
         var motion = PetMotion(now: 0)
         for step in 0..<1000 {

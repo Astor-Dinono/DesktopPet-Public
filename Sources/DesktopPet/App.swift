@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var directionItems: [NSMenuItem] = []
     private var effectChoices: InteractionEffectMenuView?
     private var tailSize = DogTailSize(storedValue: UserDefaults.standard.object(forKey: DogTailSize.preferenceKey) as? Int)
+    private var accessory = DogAccessory(storedValue: UserDefaults.standard.object(forKey: DogAccessory.preferenceKey) as? Int)
     private var positionLockItem: NSMenuItem!
     private var topbarEnabled = false
     private var topbarHidden = false
@@ -179,6 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let keyCounts = KeyCountStore()
     private let keyboard = InputMonitor()
     private let updater = DogUpdater()
+    private let loginAtStartup = LoginAtStartup()
     private var countMenuItem: NSMenuItem!
     private var todayCountItem: NSMenuItem!
     private var totalCountItem: NSMenuItem!
@@ -208,6 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         pet = PetView(frame: NSRect(origin: .zero, size: size))
         pet.setAutoNap(autoNap)
         pet.tailSize = tailSize
+        pet.accessory = accessory
         pet.positionLocked = UserDefaults.standard.object(forKey: PetView.positionLockKey) as? Bool ?? false
         pet.onDragEnded = { [weak self] in self?.finishDesktopDrag(at: $0) }
         companion = DogCompanionView(pet: pet, scale: scale)
@@ -369,6 +372,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let tail = NSMenuItem(title: "尾巴大小", action: nil, keyEquivalent: "")
         tail.submenu = tails
         appearance.addItem(tail)
+        let accessories = NSMenu()
+        for option in DogAccessory.allCases {
+            let entry = item(option.title, action: #selector(changeAccessory(_:)))
+            entry.tag = option.rawValue
+            entry.state = option == accessory ? .on : .off
+            accessories.addItem(entry)
+        }
+        let accessoryItem = NSMenuItem(title: "小配饰", action: nil, keyEquivalent: "")
+        accessoryItem.submenu = accessories
+        appearance.addItem(accessoryItem)
         appearance.addItem(.separator())
         topbarItem = item("放进顶栏", action: #selector(toggleTopbar))
         appearance.addItem(topbarItem)
@@ -420,6 +433,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let more = NSMenu()
+        more.delegate = loginAtStartup
+        more.addItem(loginAtStartup.item)
         more.addItem(item("检查更新…", action: #selector(checkForUpdates(_:))))
         more.addItem(.separator())
         more.addItem(item("互动预览…", action: #selector(showDogPreview)))
@@ -787,6 +802,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UserDefaults.standard.set(option.rawValue, forKey: DogTailSize.preferenceKey)
         sender.menu?.items.forEach { $0.state = $0 === sender ? .on : .off }
         panel.refreshPointerRouting()
+    }
+
+    @objc private func changeAccessory(_ sender: NSMenuItem) {
+        guard let option = DogAccessory(rawValue: sender.tag) else { return }
+        accessory = option
+        pet.accessory = option
+        dogPreview?.setAccessory(option)
+        UserDefaults.standard.set(option.rawValue, forKey: DogAccessory.preferenceKey)
+        sender.menu?.items.forEach { $0.state = $0 === sender ? .on : .off }
     }
 
     private func setOrientation(_ direction: DogOrientation) {

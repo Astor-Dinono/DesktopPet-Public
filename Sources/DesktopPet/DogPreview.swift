@@ -20,6 +20,7 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
         super.init(window: window)
         stage.dogs.forEach { $0.setAutoNap(autoNap) }
         stage.dogs.forEach { $0.tailSize = desktopDog.tailSize }
+        stage.dogs.forEach { $0.accessory = desktopDog.accessory }
         setPositionLocked(desktopDog.positionLocked)
         stage.dogs.forEach {
             $0.onPet = onPet
@@ -108,6 +109,7 @@ final class DogPreviewController: NSWindowController, NSWindowDelegate {
     func stop() { stage.stop() }
     func setAutoNap(_ option: AutoNap) { stage.dogs.forEach { $0.setAutoNap(option) } }
     func setTailSize(_ size: DogTailSize) { stage.dogs.forEach { $0.tailSize = size } }
+    func setAccessory(_ accessory: DogAccessory) { stage.dogs.forEach { $0.accessory = accessory } }
     func setPositionLocked(_ locked: Bool) {
         stage.dogs.forEach { $0.positionLocked = locked }
         subtitle.stringValue = locked

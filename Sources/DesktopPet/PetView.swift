@@ -90,8 +90,9 @@ final class PetPanel: NSPanel {
         companion.updatePointer(at: point)
         companion.pet.updateHover(at: companion.pet.convert(point, from: companion),
             pressedButtons: pressedButtons, hoverTime: hoverTime)
-        ignoresMouseEvents = !companion.pet.hasPointerCapture
+        let ignores = !companion.pet.hasPointerCapture
             && (pressedButtons != 0 || !companion.containsInteraction(point))
+        if ignoresMouseEvents != ignores { ignoresMouseEvents = ignores }
     }
 }
 
@@ -124,6 +125,7 @@ final class PetView: NSView {
     }
     var topbarScale: Double = 0.5 { didSet { needsDisplay = true } }
     var tailSize: DogTailSize = .small { didSet { needsDisplay = true } }
+    var accessory: DogAccessory = .none { didSet { needsDisplay = true } }
     static let positionLockKey = "dog.positionLocked"
     var positionLocked = false {
         didSet {
@@ -280,13 +282,13 @@ final class PetView: NSView {
             context.clip(to: topbarVisibleBounds)
             DogTopbarRenderer.draw(in: context, size: bounds.size, pose: pose, tail: tailPose,
                 blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize, scale: topbarScale,
-                petting: petExpression.value(now: now))
+                petting: petExpression.value(now: now), accessory: accessory)
             return
         }
         DogRenderer.draw(in: context, size: canonicalSize, pose: pose,
             angle: tailPose.angle, bend: tailPose.bend,
             blink: DogMotion.blink(now: now, reducedMotion: reducedMotion), tailSize: tailSize,
-            petting: petExpression.value(now: now))
+            petting: petExpression.value(now: now), accessory: accessory)
     }
 
     // With a baseline on the menu edge, a large dog can extend above this
@@ -317,7 +319,6 @@ final class PetView: NSView {
 
     func rest() {
         cancelPointerInteraction()
-        petExpression.cancel()
         onEffectsCleared?()
         motion.sleep(now: now)
         tail.settle(now: now)
@@ -462,15 +463,21 @@ final class PetView: NSView {
 
     private func tick() {
         guard window?.isVisible == true, window?.isMiniaturized == false else { stop(); return }
-        motion.advance(now: now)
-        if motion.sleepStarted != nil { petExpression.cancel() }
+        let time = now
+        motion.advance(now: time)
         onInteractionFrame?()
         onEffectsFrame?()
         needsDisplay = true
-        let quick = now < heartAnimationUntil || turnPresentation != nil || motion.isAnimatingQuickly(now: now)
-            || (tail.isMoving(now: now) || petExpression.isMoving(now: now) || DogMotion.blink(now: now) > 0)
-        let rate = reducedMotion ? 10.0 : (quick ? 60.0 : 30.0)
-        schedule(interval: 1 / rate)
+        schedule(interval: frameInterval(at: time, reducedMotion: reducedMotion))
+    }
+
+    /// Keep visible quick actions at 60 Hz. Ordinary blinks are hidden by sleeping eyes.
+    func frameInterval(at time: TimeInterval, reducedMotion: Bool) -> TimeInterval {
+        if reducedMotion { return 1 / 10 }
+        let quick = time < heartAnimationUntil || turnPresentation != nil || motion.isAnimatingQuickly(now: time)
+            || (tail.isMoving(now: time) || petExpression.isMoving(now: time)
+                || (motion.sleepStarted == nil && DogMotion.blink(now: time) > 0))
+        return quick ? 1 / 60 : 1 / 30
     }
 
     override func mouseDown(with event: NSEvent) {

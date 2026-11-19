@@ -60,23 +60,32 @@ struct Duang {
         return {v*w,vel*w+v*(p>0&&p<1?-6*p*(1-p)/.45:0)};
     }
     void kick(double now,double force) { from=sample(now); started=now; strength=force; }
+    void settle(double now) { if(moving(now))kick(now,0); }
     void cancel() { started=-100; from={}; strength=0; }
     double value(double now) const { return .20*std::tanh(sample(now).value/.20); }
 };
 struct RestPose { double closed=0,bubble=0,letters=0,settle=0,stretch=0,phaseAge=0; };
 struct Rest {
-    double started=-100; RestPose from; bool sleeping=false,active=false;
+    double started=-100; RestPose from; bool sleeping=false,active=false,settled=false;
     RestPose pose(double now) const {
         if(!active)return {};
         double a=std::max(0.0,now-started);
+        if(settled){auto result=from;result.phaseAge+=a;return result;}
         auto blend=[&](double v,double target,double delay,double duration){return v+(target-v)*smooth((a-delay)/duration);};
         double residual=from.stretch*(1-smooth(a/.35));
         if(sleeping)return {blend(from.closed,1,0,1.35),blend(from.bubble,1,.85,.9),blend(from.letters,1,1.45,1),blend(from.settle,1,.15,1.55),residual,from.phaseAge+a};
         double inhale=std::pow(std::sin(clamp((a-.15)/.95)*pi),2)*.014*from.settle;
         return {blend(from.closed,0,.15,.65),blend(from.bubble,0,0,.45),blend(from.letters,0,0,.35),blend(from.settle,0,.1,.95),residual+inhale,from.phaseAge+a};
     }
-    void setSleep(bool value,double now) { if((!active&&!value)||(active&&sleeping==value))return; from=pose(now); sleeping=value; active=true; started=now; }
-    bool moving(double now) const { return active&&now-started<(sleeping?2.45:1.1); }
+    void setSleep(bool value,double now) { if((!active&&!value)||(active&&sleeping==value))return; from=pose(now); sleeping=value; active=true; settled=false; started=now; }
+    // Only for a discarded, invisible transition. Preserve the sleep phase so
+    // returning does not restart the decorations or expose a half-closed eye.
+    void finishTransition(double now) {
+        if(!active)return;
+        const double phase=pose(now).phaseAge,target=sleeping?1:0;
+        from={target,target,target,target,0,phase};started=now;settled=true;
+    }
+    bool moving(double now) const { return active&&!settled&&now-started<(sleeping?2.45:1.1); }
 };
 struct Blush {
     double started=-100,from=0,target=0;

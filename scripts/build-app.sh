@@ -22,9 +22,10 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$PROJECT_DIR/.build/swift-module-cache"
 BUILD_OPTIONS=(--disable-sandbox --cache-path "$PROJECT_DIR/.build/cache" --config-path "$PROJECT_DIR/.build/config" --security-path "$PROJECT_DIR/.build/security" --manifest-cache local -debug-info-format none)
 swift build -c release "${BUILD_OPTIONS[@]}"
 BIN_DIR="$(swift build -c release --show-bin-path "${BUILD_OPTIONS[@]}")"
-APP_DIR="$PROJECT_DIR/build/DesktopPet.app"
-mkdir -p "$PROJECT_DIR/build"
-STAGE_DIR="$(mktemp -d "$PROJECT_DIR/build/.signed-build.XXXXXX")"
+OUTPUT_DIR="${DESKTOP_PET_OUTPUT_DIR:-$PROJECT_DIR/build}"
+APP_DIR="$OUTPUT_DIR/DesktopPet.app"
+mkdir -p "$OUTPUT_DIR"
+STAGE_DIR="$(mktemp -d "$OUTPUT_DIR/.signed-build.XXXXXX")"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 STAGE_APP="$STAGE_DIR/DesktopPet.app"
 mkdir -p "$STAGE_APP/Contents/MacOS" "$STAGE_APP/Contents/Resources"
@@ -75,7 +76,7 @@ codesign --verify --deep --strict "$STAGE_APP"
 codesign --verify -R "=identifier \"local.desktop-pet.prototype\" and certificate leaf = H\"$SIGNING_IDENTITY\"" "$STAGE_APP"
 # Keep the last build recoverable, and never overwrite it before signing succeeds.
 if [[ -e "$APP_DIR" ]]; then
-    BACKUP_DIR="$(mktemp -d "$PROJECT_DIR/build/previous-build.XXXXXX")"
+    BACKUP_DIR="$(mktemp -d "$OUTPUT_DIR/previous-build.XXXXXX")"
     mv "$APP_DIR" "$BACKUP_DIR/DesktopPet.app"
     if ! mv "$STAGE_APP" "$APP_DIR"; then
         mv "$BACKUP_DIR/DesktopPet.app" "$APP_DIR"

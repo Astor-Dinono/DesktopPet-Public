@@ -60,7 +60,7 @@ enum DogTopbarRenderer {
 
     static func draw(in context: CGContext, size: CGSize, pose: PetPose,
                      tail: TailPose, blink: Double, tailSize: DogTailSize, scale: Double = tinyScale,
-                     petting: Double = 0) {
+                     petting: Double = 0, accessory: DogAccessory = .none) {
         let layout = layout(size: size, scale: scale)
         context.saveGState()
         defer { context.restoreGState() }
@@ -69,6 +69,6 @@ enum DogTopbarRenderer {
         var originalPose = pose
         originalPose.sleepLetters = 0 // Keep letters out of the narrow menu strip.
         DogRenderer.draw(in: context, size: DogRenderer.canvas, pose: originalPose,
-            angle: tail.angle, bend: tail.bend, blink: blink, tailSize: tailSize, petting: petting)
+            angle: tail.angle, bend: tail.bend, blink: blink, tailSize: tailSize, petting: petting, accessory: accessory)
     }
 }

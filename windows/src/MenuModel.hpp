@@ -6,16 +6,18 @@
 #include <vector>
 
 namespace dog::menu {
-enum Command {Pet=100,Wag,Nap,Hide,Rotate,Snap,Small,Medium,Large,NapOff,Nap30,Nap60,Nap180,Nap300,Count,Always,Privacy,Website,Quit,EffectHeart=200,EffectFlower,EffectPaw,EffectStar,ChooseEffects,TailSmall=300,TailOriginal,LockPosition,ShowOperationHint};
+enum Command {Pet=100,Wag,Nap,Hide,Rotate,Snap,Small,Medium,Large,NapOff,Nap30,Nap60,Nap180,Nap300,Count,Always,Privacy,Website,Quit,EffectHeart=200,EffectFlower,EffectPaw,EffectStar,ChooseEffects,TailSmall=300,TailOriginal,LockPosition,ShowOperationHint,AccessoryNone,AccessoryScarf,AccessoryCollar,LoginAtStartup,StartupSettings,RemoveStartup};
 enum class Page {Home,Appearance,Effects,Sleep,Counts,More};
 enum class Kind {Push,Check,Radio,Combo,Label};
 enum class Style {Row,Shortcut,Tile,Close,Back,Title,Hint,Field,Stats};
 enum class Icon {None,Heart,Tail,Moon,Sparkles,Sliders,Timer,Pointer,Hide,More,Chevron,Close,Back,Rotate,Edge,Shield,Download,Exit};
-enum ControlID {Back=400,Close,Appearance,Sleep,Counts,More,SizeChoice,TailChoice,Title,Hint,Today,Total};
+enum ControlID {Back=400,Close,Appearance,Sleep,Counts,More,SizeChoice,TailChoice,Title,Hint,Today,Total,AccessoryChoice};
 struct Rect { double x,y,w,h; };
 struct Snapshot {
     bool visible=true,asleep=false,counting=false,always=false,positionLocked=false;
-    unsigned effects=1;int nap=180,size=1,tail=80;
+    bool startupAvailable=true,startupEnabled=false,canRemoveStartup=false;
+    std::wstring startupHint;
+    unsigned effects=1;int nap=180,size=1,tail=80,accessory=0;
     std::uint64_t today=0,total=0;
 };
 struct Item {
@@ -57,7 +59,9 @@ inline Plan layout(Page page,const Snapshot& s){
         add(Title+20,Kind::Label,Style::Field,{20,y,108,36},L"小狗大小");
         add(SizeChoice,Kind::Combo,Style::Field,{136,y+4,96,28},L"小狗大小",Icon::None,L"",false,false,s.size);y+=38;
         add(Title+21,Kind::Label,Style::Field,{20,y,108,36},L"尾巴大小");
-        add(TailChoice,Kind::Combo,Style::Field,{136,y+4,96,28},L"尾巴大小",Icon::None,L"",false,false,s.tail==100?1:0);y+=38;break;
+        add(TailChoice,Kind::Combo,Style::Field,{136,y+4,96,28},L"尾巴大小",Icon::None,L"",false,false,s.tail==100?1:0);y+=38;
+        add(Title+22,Kind::Label,Style::Field,{20,y,108,36},L"小配饰");
+        add(AccessoryChoice,Kind::Combo,Style::Field,{136,y+4,96,28},L"小配饰",Icon::None,L"",false,false,s.accessory>=0&&s.accessory<=2?s.accessory:0);y+=38;break;
     case Page::Effects:{
         label(Hint,effectCount(s.effects)?L"可多选 · 随机出现":L"特效已关闭");
         const wchar_t* names[]={L"爱心",L"小花",L"小爪子",L"小星星"};
@@ -73,12 +77,22 @@ inline Plan layout(Page page,const Snapshot& s){
         add(Always,Kind::Check,Style::Row,{12,y,228,32},L"始终显示数字",Icon::None,L"",s.always);y+=32;line();
         label(Today,L"今日  "+std::to_wstring(s.today),Style::Stats);label(Total,L"累计  "+std::to_wstring(s.total),Style::Stats);break;
     case Page::More:
+        if(s.startupAvailable){
+            add(LoginAtStartup,Kind::Check,Style::Row,{12,y,228,32},L"登录时自动启动",Icon::None,L"",s.startupEnabled);y+=32;
+            if(!s.startupHint.empty()) row(s.canRemoveStartup?RemoveStartup:StartupSettings,s.startupHint.c_str(),Icon::Sliders,L"",true);
+        }
         row(ShowOperationHint,L"操作提示…",Icon::Pointer);row(Privacy,L"隐私与计数说明",Icon::Shield);row(Website,L"检查更新",Icon::Download);line();row(Quit,L"退出小狗",Icon::Exit);break;
     }
     p.height=y+12;return p;
 }
 inline bool isNavigation(int id){return id==Appearance||id==ChooseEffects||id==Sleep||id==Counts||id==More;}
 inline Page destination(int id){return id==Appearance?Page::Appearance:id==ChooseEffects?Page::Effects:id==Sleep?Page::Sleep:id==Counts?Page::Counts:Page::More;}
-inline int comboCommand(int id,int value){return id==SizeChoice?(value==0?Small:value==2?Large:Medium):(value==1?TailOriginal:TailSmall);}
-inline bool closesForCommand(int id,const Snapshot& s){return id==ShowOperationHint||id==Rotate||id==Hide||id==Privacy||id==Website||id==Quit||(id==Count&&!s.counting);}
+inline int comboCommand(int id,int value){return id==AccessoryChoice?(value==1?AccessoryScarf:value==2?AccessoryCollar:AccessoryNone):id==SizeChoice?(value==0?Small:value==2?Large:Medium):(value==1?TailOriginal:TailSmall);}
+inline int comboCount(int id){return id==TailChoice?2:3;}
+inline const wchar_t* comboLabel(int id,int index){
+    const wchar_t* sizes[]={L"小号",L"中号",L"大号"};const wchar_t* tails[]={L"小一圈",L"原来大小"};const wchar_t* accessories[]={L"无",L"小围巾",L"细项圈"};
+    if(index<0||index>=comboCount(id))return L"";
+    return id==AccessoryChoice?accessories[index]:id==SizeChoice?sizes[index]:tails[index];
+}
+inline bool closesForCommand(int id,const Snapshot& s){return id==LoginAtStartup||id==StartupSettings||id==RemoveStartup||id==ShowOperationHint||id==Rotate||id==Hide||id==Privacy||id==Website||id==Quit||(id==Count&&!s.counting);}
 } // namespace dog::menu

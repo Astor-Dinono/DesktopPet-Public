@@ -4,21 +4,19 @@
 
 [官网与下载](https://desktop-pet-dog.pages.dev/) · [Mac 安装与更新](https://desktop-pet-dog.pages.dev/install.html) · [Windows 试用版](https://desktop-pet-dog.pages.dev/windows.html)
 
-## Mac build 60 / Windows build 16：睡眼和摸摸，衔接更自然
+## 登录时自动启动 · Mac 61 / Windows 17
 
-1. 打完哈欠后保持完整睡眼，衔接时不再收缩
-2. 睁眼和摸摸的 `><` 表情连续变化，减少叠影和突变
-3. 原有计数与设置继续保留
-
-Mac 本机睡醒已查看；Windows 逻辑与交叉构建检查通过，实际界面和完整升级仍待设备反馈
+1. 右键小狗 → 更多 → 登录时自动启动。默认关闭，勾选后，小狗会在下次登录当前账户时出现
+2. 外观与摆放 → 小配饰，可选小围巾或细项圈，也可以保留原来的小白狗
+3. 点击后马上拖动、摸摸后打盹或刚醒又睡时，动作衔接更顺
 
 ## 下载与使用
 
-1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 60](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b60-arm64.zip)
-2. Windows 10（1809 或更新）/11，64 位 x64：[下载 Windows build 16 安装程序](https://desktop-pet-dog.pages.dev/updates/DesktopPet-Windows-0.1.0-b16-x64-Setup.exe)
+1. Apple 芯片 Mac，macOS 14 或以上：[下载 Mac build 61](https://desktop-pet-dog.pages.dev/updates/DesktopPet-0.1.0-b61-arm64.zip)
+2. Windows 10（1809 或更新）/11，64 位 x64：[下载 Windows build 17 安装程序](https://desktop-pet-dog.pages.dev/updates/DesktopPet-Windows-0.1.0-b17-x64-Setup.exe)
 3. 已安装的小狗可右键 → 更多 → 检查更新，确认后下载安装，保留原计数和设置
 4. Mac 当前为开发签名测试版，尚未完成 Developer ID 签名与公证；Windows 安装包尚无 Authenticode 代码签名，首次打开可能出现系统安全提示，请核对下载来源并自行决定是否运行，无需关闭系统保护
-5. Windows build 16 的睡眼衔接、摸摸表情和完整升级尚未完成真实 Windows 设备验收，欢迎小范围试用反馈
+5. 两端实际注销后重新登录的启动体验和本次完整在线升级仍待实机反馈
 
 ## 小狗能做什么
 

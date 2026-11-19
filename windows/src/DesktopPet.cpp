@@ -16,8 +16,10 @@
 #include <atomic>
 #include <random>
 #include "DogArtwork.hpp"
+#include "DogAccessory.hpp"
 #include "InteractionEffectArtwork.hpp"
 #include "DogUpdater.hpp"
+#include "LoginStartup.hpp"
 #include "ContextMenu.hpp"
 #include "RotationFocus.hpp"
 #include "HeldKeys.hpp"
@@ -25,6 +27,7 @@
 #include "HoverStrokeGesture.hpp"
 #include "PetExpression.hpp"
 #include "YawnMotion.hpp"
+#include "FrameSchedule.hpp"
 #include "YawnDrawing.hpp"
 #include "SqueezeEyes.hpp"
 #include "OperationHint.hpp"
@@ -66,6 +69,7 @@ struct Surface {
 };
 struct Settings {
     dog::TailSize tailSize=dog::TailSize::Small;
+    dog::Accessory accessory=dog::Accessory::None;
     std::wstring folder,file;dog::Counts counts;double size=.62;int orientation=0,nap=180;unsigned effectsMask=1;bool always=false,hasPosition=false,positionLocked=false,operationHints=true;dog::Point center;
     bool init(){
         PWSTR base=nullptr;if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,KF_FLAG_CREATE,nullptr,&base)))return false;
@@ -81,6 +85,7 @@ struct Settings {
         always=integer(L"AlwaysShow",0)==1;hasPosition=integer(L"HasPosition",0)==1;
         effectsMask=unsigned(integer(L"InteractionEffects",1))&15;
         tailSize=dog::storedTailSize(integer(L"TailSize",80));
+        accessory=dog::storedAccessory(integer(L"Accessory",0));
         positionLocked=integer(L"PositionLocked",0)==1;
         operationHints=integer(L"OperationHints",1)==1;
         center={std::wcstod(read(L"CenterX",L"0").c_str(),nullptr),std::wcstod(read(L"CenterY",L"0").c_str(),nullptr)};
@@ -91,6 +96,7 @@ struct Settings {
         std::wstring text=L"\xFEFF[Dog]\r\nCounting="+std::to_wstring(counts.enabled)+L"\r\nTotal="+std::to_wstring(counts.total)+L"\r\nToday="+std::to_wstring(counts.today)+L"\r\nDate="+std::to_wstring(counts.date)+L"\r\nSize="+std::to_wstring(size)+L"\r\nOrientation="+std::to_wstring(orientation)+L"\r\nAutoNap="+std::to_wstring(nap)+L"\r\nAlwaysShow="+std::to_wstring(always)+L"\r\nHasPosition=1\r\nCenterX="+std::to_wstring(center.x)+L"\r\nCenterY="+std::to_wstring(center.y)+L"\r\n";
         text+=L"InteractionEffects="+std::to_wstring(effectsMask)+L"\r\n";
         text+=L"TailSize="+std::to_wstring(int(tailSize))+L"\r\n";
+        text+=L"Accessory="+std::to_wstring(int(accessory))+L"\r\n";
         text+=L"PositionLocked="+std::to_wstring(positionLocked)+L"\r\n";
         text+=L"OperationHints="+std::to_wstring(operationHints)+L"\r\n";
         auto temp=file+L".tmp";HANDLE h=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(h==INVALID_HANDLE_VALUE)return false;
@@ -111,7 +117,8 @@ struct App {
     inline static std::atomic<HWND> callbackWindow{nullptr};bool readySent=false;
     dog::Fade countFade;bool resumeTurn=false;double resumeAngle=0;
     dog::EffectPicker effectPicker;std::mt19937 effectRandom{std::random_device{}()};
-    dog::Point center;double angle=0,dpi=1,lastActivity=0,nextFrame=0,lastFrame=-100;bool turning=false,visible=true,suspended=false,locked=false,reduced=false,hover=false,selected=false,pressed=false,dragging=false,inputActive=false,dirty=false,menuOpen=false;
+    dog::FrameSchedule frameSchedule;
+    dog::Point center;double angle=0,dpi=1,lastActivity=0;bool turning=false,visible=true,suspended=false,locked=false,reduced=false,hover=false,selected=false,pressed=false,dragging=false,inputActive=false,dirty=false,menuOpen=false;
     POINT pressPoint{};dog::Point pressCenter;int radius=0,fxPad=0;RECT windowRect{};unsigned frameFailures=0;
     // Parsed once, then only transformed at render time.
     const std::vector<dog::Segment> head=dog::parsePath(dog::headPath),tailShape=dog::parsePath(dog::tailPath),mouth=dog::parsePath(dog::mouthPath),bubble=dog::parsePath(dog::bubblePath),heart=dog::parsePath(dog::heartPath);
@@ -137,20 +144,28 @@ struct App {
     }
     void updateReduced(){BOOL enabled=TRUE;SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION,0,&enabled,0);reduced=!enabled;}
     bool running()const{return visible&&!suspended&&!locked&&!displayOff;}
-    void requestFrame(){if(running()){nextFrame=std::min(nextFrame,std::max(now(),lastFrame+1.0/60));schedule();}}
+    void requestFrame(){if(running()){frameSchedule.request(now());schedule();}}
     void schedule(){
-        if(!timer)return;if(!running()){CancelWaitableTimer(timer);return;}
-        LARGE_INTEGER due;due.QuadPart=-LONGLONG(std::max(.0001,nextFrame-now())*10000000);
-        SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE);
+        if(!timer)return;if(!running()){CancelWaitableTimer(timer);frameSchedule.disarm();return;}
+        if(!frameSchedule.needsArm())return;
+        LARGE_INTEGER due;due.QuadPart=-LONGLONG(std::max(.0001,frameSchedule.next-now())*10000000);
+        if(SetWaitableTimer(timer,&due,0,nullptr,nullptr,FALSE))frameSchedule.arm();
     }
-    bool fast(double t)const{return !reduced&&(turning||(pressed&&!pressIsStroke)||tail.moving(t)||duang.moving(t)||rest.moving(t)||yawn.moving(t)||t-blush.started<2.6||petExpression.moving(t)||countFade.moving(t)||!hearts.items.empty());}
+    bool fast(double t)const{return !reduced&&(turning||(pressed&&!pressIsStroke)||tail.moving(t)||duang.moving(t)||rest.moving(t)||yawn.moving(t)||t-blush.started<2.6||petExpression.moving(t)||countFade.moving(t)||!hearts.items.empty()||dog::blinkNeedsFastFrames(t,reduced,rest.sleeping));}
+    void discardInvisibleYawn(double t){
+        if(rest.sleeping&&yawn.moving(t))rest.finishTransition(t);
+        yawn.clear();
+    }
     void activity(bool wag){
         double t=now();lastActivity=t;
         if(running()&&!dragging){if(rest.sleeping)yawn.cancel(t);rest.setSleep(false,t);if(wag)tail.wag(t);requestFrame();}
     }
     void setNap(bool sleeping,double t){
         if(rest.sleeping==sleeping){if(!sleeping)lastActivity=t;return;}
-        if(sleeping){yawn.start(t);hoverStroke.cancel();operationHint.hide();tail.settle(t);petExpression.clear();hearts.items.clear();if(duang.moving(t))duang.kick(t,0);}
+        if(sleeping){
+            if(t>=rest.started&&rest.moving(t))yawn.resumeSleep(t);else yawn.start(t);
+            hoverStroke.cancel();operationHint.hide();tail.settle(t);hearts.items.clear();duang.settle(t);
+        }
         else{yawn.cancel(t);lastActivity=t;}
         rest.setSleep(sleeping,t);requestFrame();
     }
@@ -220,7 +235,7 @@ struct App {
         if(GetCapture()!=window){cancelPointer();return;}
         if(pressIsStroke){if(stroke.move(p*(1/dpi),t,hitsPet(p)))strokePet(p,t);return;}
         double dx=p.x-pressPoint.x,dy=p.y-pressPoint.y;
-        if(!dragging&&dx*dx+dy*dy>16*dpi*dpi){dragging=true;duang.cancel();}
+        if(!dragging&&dx*dx+dy*dy>16*dpi*dpi){dragging=true;duang.settle(t);}
         if(dragging){center=pressCenter+dog::Point{dx,dy};center=dog::fit(center,dog::extent(angle,unit()),work());requestFrame();}
     }
     void endPointer(dog::Point p){
@@ -268,6 +283,9 @@ struct App {
     void addTray(){
         NOTIFYICONDATAW n{};n.cbSize=sizeof(n);n.hWnd=window;n.uID=1;n.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;n.uCallbackMessage=trayMessage;
         n.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));wcscpy_s(n.szTip,L"小狗桌宠 · Windows 试用版");
+#ifdef DESKTOP_PET_DIAGNOSTIC_APP
+        wcscpy_s(n.szTip,L"小狗桌宠 · 临时诊断");
+#endif
         trayAdded=Shell_NotifyIconW(NIM_ADD,&n)!=FALSE;
     }
     void removeTray(){NOTIFYICONDATAW n{};n.cbSize=sizeof(n);n.hWnd=window;n.uID=1;Shell_NotifyIconW(NIM_DELETE,&n);trayAdded=false;}
@@ -277,7 +295,7 @@ struct App {
         clearSelection();if(!value)contextMenu.close();
         visible=value;selected=false;hover=false;pressed=false;dragging=false;hearts.items.clear();
         if(value){center=dog::fit(center,dog::extent(angle,unit()),work());lastActivity=now();ShowWindow(window,SW_SHOWNOACTIVATE);requestFrame();}
-        else{yawn.clear();ShowWindow(window,SW_HIDE);ShowWindow(effects,SW_HIDE);fxShown=false;CancelWaitableTimer(timer);save();}
+        else{discardInvisibleYawn(now());ShowWindow(window,SW_HIDE);ShowWindow(effects,SW_HIDE);fxShown=false;CancelWaitableTimer(timer);frameSchedule.disarm();save();}
     }
     void fit(){center=dog::fit(center,dog::extent(angle,unit()),work());markDirty();requestFrame();}
     void clearSelection(){selected=false;dog::passiveWindow(window,true);}
@@ -358,6 +376,9 @@ struct App {
             Matrix transform(REAL(c*u*sx),REAL(sn*u*sx),REAL(-sn*u*sy),REAL(c*u*sy),REAL(origin.x),REAL(origin.y));
             auto saved=g.Save();g.MultiplyTransform(&transform);SolidBrush fill(ink);g.FillPath(&fill,&earFill);g.Restore(saved);
         }
+        dog::drawAccessory(settings.accessory,[&](const auto& segments,std::uint32_t stroke,double width,std::uint32_t fill){
+            path(g,segments,headTransform,Color(stroke),width*unit(),Color(fill));
+        });
         auto drawNormalFace=[&](Graphics& faceGraphics){
         path(faceGraphics,mouth,faceTransform,ink,dog::mouthWidth*unit());ellipse(faceGraphics,faceTransform,{285,206},17.57,10.95,ink);
         const double blink=dog::blink(t,reduced),closed=1-(1-restPose.closed)*(1-blink);
@@ -421,7 +442,8 @@ struct App {
         return true;
     }
     void tick(){
-        double t=now();if(!running()){schedule();return;}lastFrame=t;
+        double t=now();if(!running()){schedule();return;}
+        if(!frameSchedule.begin(t)){schedule();return;}
         if(settings.counts.roll(date()))markDirty();
         if(turning){auto p=turn.pose(t);center=p.center;angle=p.angle;if(!turn.moving(t)){turning=false;angle=std::fmod(angle,2*dog::pi);markDirty();}}
         if(!pressed&&!menuOpen&&settings.nap&&t-lastActivity>=settings.nap&&!rest.sleeping)setNap(true,lastActivity+settings.nap);
@@ -435,7 +457,7 @@ struct App {
             if(!GetCursorPos(&p))hoverStroke.cancel();
             else validateHover({double(p.x),double(p.y)},t,pointerButtonsDown(),WindowFromPoint(p)==window);
         }
-        nextFrame=t+(fast(t)?1.0/60:1.0/30);schedule();
+        frameSchedule.finish(t,fast(t));schedule();
     }
     static int __cdecl canInstall(){
         HWND target=callbackWindow.load();DWORD_PTR saved=0;
@@ -443,12 +465,50 @@ struct App {
     }
     static void __cdecl quitForUpdate(){if(HWND target=callbackWindow.load())PostMessageW(target,updateQuitMessage,0,0);}
     void checkUpdates(){
+#ifdef DESKTOP_PET_DIAGNOSTIC_APP
+        MessageBoxW(window,L"这是独立临时试用，不会更新或替换已安装的小狗。",L"小狗诊断",MB_OK|MB_ICONINFORMATION);return;
+#endif
         callbackWindow.store(window);
         if(!updater.checkNow(canInstall,quitForUpdate))MessageBoxW(window,L"更新组件暂时不可用，小狗可以照常陪你。请从官网重新下载安装包，不要删除本地计数和设置。",L"暂时无法检查更新",MB_OK|MB_ICONINFORMATION);
     }
     void privacy(){MessageBoxW(window,L"计数默认关闭，开启后累计键盘和鼠标按钮的按下次数。\n\n为排除长按重复，仅在内存里用物理按键编号保留“按着／已松开”标记，松开就清除，暂停计数、锁屏、休眠或退出时全部清空。不转换文字、不读取虚拟键码、应用或设备身份，不记录顺序、逐次时间或事件明细；只在本机保存今日、累计和偏好。\n\n长按只计一次，松开再按正常计数。单独修饰键仍计入，移动和滚轮不计。计数开启时，跨应用按下也能唤醒小狗，键盘会摇尾巴。\n\n日常没有后台联网或更新轮询。只有主动选择“检查更新”时才初始化更新器并访问官网，确认后下载、校验签名并安装。更新请求不包含计数或输入；服务器仍可看到普通网络信息（例如 IP 地址）。",L"小狗的隐私说明",MB_OK|MB_ICONINFORMATION);}
+    // Read at menu opening and again on the explicit command; never from the animation timer.
+    dog::startup::State loginState = dog::startup::State::Off;
+    void openStartupSettings(){
+        if (INT_PTR(ShellExecuteW(window,L"open",L"ms-settings:startupapps",nullptr,nullptr,SW_SHOWNORMAL)) <= 32)
+            MessageBoxW(window,L"请打开 Windows 设置 → 应用 → 启动，找到小狗的启动项。",L"启动应用",MB_OK|MB_ICONINFORMATION);
+    }
+    void changeLoginStartup(bool remove = false){
+#ifndef DESKTOP_PET_NATIVE_UI_TEST
+        using dog::startup::State;
+        dog::startup::LoginItem item(dog::startup::modulePath());
+        const State current = item.state();
+        const bool enable = !remove && loginState != State::On;
+        if (current == State::Unavailable) {
+            MessageBoxW(window,L"暂时无法读取或设置这个启动项。请在 Windows 设置 → 应用 → 启动中检查，或把小狗安装到较短的路径。",L"登录时自动启动",MB_OK|MB_ICONWARNING);
+            return;
+        }
+        if (enable && (current == State::SystemDisabled || current == State::SystemManaged)) {
+            openStartupSettings();
+            return;
+        }
+        if (!enable && (current == State::Off || current == State::OtherCopy)) return;
+        if (current == State::OtherCopy && MessageBoxW(window,L"启动项指向另一处的小狗。要改为登录时打开当前这份小狗吗？",L"登录时自动启动",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2) != IDYES) return;
+        const LSTATUS result = item.setEnabled(enable, current == State::OtherCopy);
+        loginState = item.state();
+        if (result != ERROR_SUCCESS) {
+            const auto message = L"更改启动项失败，Windows 错误代码 " + std::to_wstring(result);
+            MessageBoxW(window,message.c_str(),L"登录时自动启动",MB_OK|MB_ICONWARNING);
+        } else if (enable && (loginState == State::SystemDisabled || loginState == State::SystemManaged)) {
+            if (MessageBoxW(window,L"小狗已添加到启动项。要打开 Windows 启动设置，确认允许小狗启动吗？",L"登录时自动启动",MB_YESNO|MB_ICONINFORMATION) == IDYES) openStartupSettings();
+        }
+#else
+        (void)remove;
+#endif
+    }
     void command(UINT id){
         if(id>=EffectHeart&&id<=EffectStar){settings.effectsMask^=1u<<(id-EffectHeart);markDirty();return;}
+        if(id>=AccessoryNone&&id<=AccessoryCollar){settings.accessory=dog::storedAccessory(int(id-AccessoryNone));markDirty();requestFrame();return;}
         switch(id){
         case ShowOperationHint:if(!visible)show(true);hintState.openManually();activity(false);requestFrame();break;
         case LockPosition:cancelPointer();settings.positionLocked=!settings.positionLocked;petHitReady=false;markDirty();requestFrame();break;
@@ -463,13 +523,27 @@ struct App {
             if(!registerInput()&&settings.counts.enabled){settings.counts.enabled=false;MessageBoxW(window,L"系统暂时没有启用计数，请稍后再试。小狗的其他互动可以继续使用。",L"点击次数",MB_OK|MB_ICONWARNING);}
             markDirty();requestFrame();break;}
         case Always:settings.always=!settings.always;markDirty();requestFrame();break;case Privacy:privacy();break;
+        case LoginAtStartup:changeLoginStartup();break;
+        case StartupSettings:openStartupSettings();break;
+        case RemoveStartup:changeLoginStartup(true);break;
         case Website:checkUpdates();break;
         case Quit:save();DestroyWindow(window);break;
         }
     }
     dog::menu::Snapshot menuSnapshot()const{
         dog::menu::Snapshot s;s.visible=visible;s.asleep=rest.sleeping;s.counting=settings.counts.enabled;s.always=settings.always;
+#ifdef DESKTOP_PET_NATIVE_UI_TEST
+        s.startupAvailable = false;
+#else
+        using dog::startup::State;
+        s.startupEnabled = loginState == State::On;
+        s.canRemoveStartup = loginState == State::SystemDisabled || loginState == State::SystemManaged;
+        if (loginState == State::SystemDisabled) s.startupHint = L"系统已关闭 · 移除启动项";
+        if (loginState == State::SystemManaged) s.startupHint = L"系统管理中 · 移除启动项";
+        if (loginState == State::Unavailable) s.startupHint = L"无法读取 · 打开启动设置";
+#endif
         s.positionLocked=settings.positionLocked;
+        s.accessory=int(settings.accessory);
         s.effects=settings.effectsMask;s.nap=settings.nap;s.size=settings.size<.56?0:settings.size<.70?1:2;s.tail=int(settings.tailSize);
         s.today=settings.counts.today;s.total=settings.counts.total;return s;
     }
@@ -493,6 +567,9 @@ struct App {
         operationHint.hide();
         cancelPointer();
         menuOpen=true;
+#ifndef DESKTOP_PET_NATIVE_UI_TEST
+        loginState = dog::startup::LoginItem(dog::startup::modulePath()).state();
+#endif
         bool shown=contextMenu.show(window,point,[this](){return menuSnapshot();},[this](unsigned id){command(id);},[this](){menuOpen=false;lastActivity=now();requestFrame();},initial,[this](){return menuAvoidBounds();});
         if(!shown){menuOpen=false;requestFrame();MessageBoxW(window,L"菜单暂时没有打开，请从托盘重试。",L"小狗桌宠",MB_OK|MB_ICONINFORMATION);}
     }
@@ -501,7 +578,7 @@ struct App {
         cancelPointer();petExpression.clear();
         clearSelection();contextMenu.close();
         selected=false;pressed=false;dragging=false;hover=false;hearts.items.clear();registerInput();
-        if(!running()){yawn.clear();CancelWaitableTimer(timer);ShowWindow(effects,SW_HIDE);fxShown=false;save();}
+        if(!running()){discardInvisibleYawn(now());CancelWaitableTimer(timer);frameSchedule.disarm();ShowWindow(effects,SW_HIDE);fxShown=false;save();}
         else{lastActivity=now();requestFrame();}
     }
     LRESULT message(UINT m,WPARAM w,LPARAM l){
@@ -555,8 +632,8 @@ struct App {
         if(m==WM_NCCREATE){app=static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);app->window=h;SetWindowLongPtrW(h,GWLP_USERDATA,LONG_PTR(app));}
         return app?app->message(m,w,l):DefWindowProcW(h,m,w,l);
     }
-    int run(){
-        if(!settings.init()){MessageBoxW(nullptr,L"无法创建本地设置文件夹，小狗没有启动。",L"小狗桌宠",MB_OK|MB_ICONERROR);return 1;}
+    int run(bool loadSettings=true){
+        if(loadSettings&&!settings.init()){MessageBoxW(nullptr,L"无法创建本地设置文件夹，小狗没有启动。",L"小狗桌宠",MB_OK|MB_ICONERROR);return 1;}
         hintState.beginSession(settings.operationHints);
         WNDCLASSEXW cls{sizeof(cls)};cls.style=CS_DBLCLKS;cls.lpfnWndProc=proc;cls.hInstance=instance;cls.lpszClassName=className;cls.hIcon=LoadIconW(instance,MAKEINTRESOURCEW(1));cls.hCursor=LoadCursorW(nullptr,IDC_ARROW);if(!RegisterClassExW(&cls))return 2;
         window=CreateWindowExW(WS_EX_LAYERED|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,className,L"小狗桌宠",WS_POPUP,0,0,1,1,nullptr,nullptr,instance,this);if(!window)return 3;

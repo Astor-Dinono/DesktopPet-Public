@@ -50,8 +50,12 @@ struct PetMotion {
 
     private mutating func enterSleep(now: TimeInterval, automatic: Bool) {
         guard sleepStarted == nil else { return }
+        let resumingSleep = rest.isTransitioning(now: now)
         rest.sleep(now: now)
-        if dogYawnEnabled { dogYawn.start(now: now) }
+        if dogYawnEnabled {
+            if resumingSleep { dogYawn.resumeSleep(now: now) }
+            else { dogYawn.start(now: now) }
+        }
         sleepStarted = now
         reactionStarted = nil
         sleepingAutomatically = automatic
@@ -88,7 +92,7 @@ struct PetMotion {
         isDragging = true
         landingStarted = nil
         reactionStarted = nil
-        duang.cancel()
+        duang.settle(now: now)
     }
 
     mutating func endDrag(now: TimeInterval) {
@@ -101,7 +105,7 @@ struct PetMotion {
     mutating func cancelDrag(now: TimeInterval) {
         isDragging = false
         landingStarted = nil
-        duang.cancel()
+        duang.settle(now: now)
         wake(now: now)
     }
 

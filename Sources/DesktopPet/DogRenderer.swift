@@ -94,6 +94,21 @@ enum DogRenderer {
 
     static let headOutline = headPath()
 
+    // Immutable hit geometry: motion still transforms every query, but the unbent
+    // silhouettes and their ink never need to be reconstructed for each frame.
+    private struct HitGeometry {
+        let fill: CGPath
+        let ink: CGPath
+        init(_ path: NSBezierPath) {
+            fill = path.cgPath
+            ink = fill.copy(strokingWithWidth: 3.6, lineCap: .round, lineJoin: .round, miterLimit: 10)
+        }
+        func contains(_ point: CGPoint) -> Bool { fill.contains(point) || ink.contains(point) }
+    }
+    private static let headHit = HitGeometry(headOutline)
+    private static let smallTailHit = HitGeometry(tailPath(tailSize: .small))
+    private static let originalTailHit = HitGeometry(tailPath(tailSize: .original))
+
     /// Filled, variable-width creases are sampled once in source space. They
     /// meet the outer rim at its full width without stacking unequal round caps.
     static let earLines: NSBezierPath = {
@@ -178,12 +193,10 @@ enum DogRenderer {
         // Include the visible ink, but not the transparent margins or floating effects.
         if includesBaseline, baselineInk.contains(local) { return true }
         guard local.y >= baselineY else { return false }
-        func hits(_ path: NSBezierPath, _ transform: CGAffineTransform) -> Bool {
-            let p = local.applying(transform.inverted())
-            return path.contains(p) || path.cgPath.copy(strokingWithWidth: 3.6,
-                lineCap: .round, lineJoin: .round, miterLimit: 10).contains(p)
-        }
-        return hits(headOutline, headTransform(pose)) || hits(tailPath(bend: bend, tailSize: tailSize), tailTransform(angle))
+        if headHit.contains(local.applying(headTransform(pose).inverted())) { return true }
+        let tail = bend == 0 ? (tailSize == .small ? smallTailHit : originalTailHit)
+            : HitGeometry(tailPath(bend: bend, tailSize: tailSize))
+        return tail.contains(local.applying(tailTransform(angle).inverted()))
     }
 
     /// Placement-only geometry. Excludes the transparent canvas and sleep letters.
@@ -193,8 +206,7 @@ enum DogRenderer {
                 weight: yawn.weight, normalPose: pose)
         }
         var transform = headTransform(pose)
-        let head = headOutline.cgPath.copy(strokingWithWidth: 3.6,
-            lineCap: .round, lineJoin: .round, miterLimit: 10).copy(using: &transform)!.boundingBoxOfPath
+        let head = headHit.ink.copy(using: &transform)!.boundingBoxOfPath
             .intersection(CGRect(x: 0, y: baselineY, width: canvas.width, height: canvas.height - baselineY))
         let scale = min(size.width / canvas.width, size.height / canvas.height)
         return head.applying(CGAffineTransform(translationX: (size.width - canvas.width * scale) / 2, y: 1)
@@ -247,24 +259,24 @@ enum DogRenderer {
 
     static func draw(in context: CGContext, size: NSSize, pose: PetPose = PetPose(),
                      angle: Double = 0, bend: Double = 0, blink: Double = 0, tailSize: DogTailSize = .small,
-                     petting: Double = 0) {
+                     petting: Double = 0, accessory: DogAccessory = .none) {
         guard let yawn = pose.yawn, yawn.weight > 0, DogYawnArtwork.available else {
             drawRegular(in: context, size: size, pose: pose, angle: angle, bend: bend,
-                blink: blink, tailSize: tailSize, petting: petting)
+                blink: blink, tailSize: tailSize, petting: petting, accessory: accessory)
             return
         }
         if yawn.weight >= 1 {
-            DogYawnArtwork.draw(in: context, size: size, time: yawn.time, tailSize: tailSize)
+            DogYawnArtwork.draw(in: context, size: size, time: yawn.time, tailSize: tailSize, accessory: accessory)
             return
         }
         DogYawnArtwork.drawBlended(in: context, size: size, time: yawn.time, tailSize: tailSize,
             weight: yawn.weight, normalPose: pose, normalAngle: angle, normalBend: bend,
-            blink: blink, petting: petting)
+            blink: blink, petting: petting, accessory: accessory)
     }
 
     private static func drawRegular(in context: CGContext, size: NSSize, pose: PetPose,
                      angle: Double, bend: Double, blink: Double, tailSize: DogTailSize,
-                     petting: Double) {
+                     petting: Double, accessory: DogAccessory) {
         context.saveGState()
         defer { context.restoreGState() }
         let scale = min(size.width / canvas.width, size.height / canvas.height)
@@ -292,6 +304,7 @@ enum DogRenderer {
         ink.setFill()
         earLines.fill()
 
+        DogAccessoryRenderer.draw(accessory, in: context)
         drawFace(in: context, pose: pose, blink: blink, petting: petting)
         context.restoreGState()
         context.restoreGState()

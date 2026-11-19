@@ -89,8 +89,7 @@ class ContextMenu {
             if(!c->window){rebuilding=false;close();return false;}
             SendMessageW(c->window,WM_SETFONT,WPARAM(font),FALSE);
             if(item.kind==menu::Kind::Combo){
-                const wchar_t* sizeNames[]={L"小号",L"中号",L"大号"};const wchar_t* tailNames[]={L"小一圈",L"原来大小"};
-                for(int i=0;i<(item.id==menu::SizeChoice?3:2);++i)SendMessageW(c->window,CB_ADDSTRING,0,LPARAM(item.id==menu::SizeChoice?sizeNames[i]:tailNames[i]));
+                for(int i=0;i<menu::comboCount(item.id);++i)SendMessageW(c->window,CB_ADDSTRING,0,LPARAM(menu::comboLabel(item.id,i)));
                 SendMessageW(c->window,CB_SETITEMHEIGHT,WPARAM(-1),px(24));SendMessageW(c->window,CB_SETCURSEL,item.selection,0);
             }else{
                 SetWindowLongPtrW(c->window,GWLP_USERDATA,LONG_PTR(c.get()));
@@ -127,11 +126,10 @@ class ContextMenu {
         case WM_DRAWITEM:{
             auto draw=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(draw->CtlType!=ODT_COMBOBOX)break;
             auto c=control(int(draw->CtlID));if(!c)return TRUE;Gdiplus::Graphics g(draw->hDC);configure(g);
-            const wchar_t* sizes[]={L"小号",L"中号",L"大号"};const wchar_t* tails[]={L"小一圈",L"原来大小"};
-            int n=int(draw->itemID);if(n<0)n=c->item.selection;if(n<0||n>=(c->item.id==menu::SizeChoice?3:2))return TRUE;
+            int n=int(draw->itemID);if(n<0)n=c->item.selection;if(n<0||n>=menu::comboCount(c->item.id))return TRUE;
             menu::Rect r{draw->rcItem.left/scale,draw->rcItem.top/scale,(draw->rcItem.right-draw->rcItem.left)/scale,(draw->rcItem.bottom-draw->rcItem.top)/scale};
             Gdiplus::SolidBrush brush((draw->itemState&ODS_SELECTED)?painting.palette.hover:painting.palette.background);g.FillRectangle(&brush,Gdiplus::REAL(r.x),Gdiplus::REAL(r.y),Gdiplus::REAL(r.w),Gdiplus::REAL(r.h));
-            r.x+=5;r.w-=10;painting.text(g,c->item.id==menu::SizeChoice?sizes[n]:tails[n],r,painting.palette.foreground);return TRUE;
+            r.x+=5;r.w-=10;painting.text(g,menu::comboLabel(c->item.id,n),r,painting.palette.foreground);return TRUE;
         }
         case WM_CTLCOLORLISTBOX:{HDC dc=reinterpret_cast<HDC>(w);auto fg=painting.palette.foreground,bg=painting.palette.background;SetTextColor(dc,RGB(fg.GetR(),fg.GetG(),fg.GetB()));SetBkColor(dc,RGB(bg.GetR(),bg.GetG(),bg.GetB()));return LRESULT(comboBrush);}
         case WM_ACTIVATE:if(LOWORD(w)==WA_INACTIVE&&!rebuilding)close();return 0;

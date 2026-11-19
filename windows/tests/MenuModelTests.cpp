@@ -43,9 +43,20 @@ int main(){
     for(int id:{Pet,Wag,Nap,Always,LockPosition,EffectHeart,EffectFlower,EffectPaw,EffectStar,Small,Medium,Large,TailSmall,TailOriginal})assert(!closesForCommand(id,s));
     for(int id:{ShowOperationHint,Rotate,Hide,Privacy,Website,Quit})assert(closesForCommand(id,s));
     assert(find(layout(Page::More,s),ShowOperationHint).label==L"操作提示…");
+    assert(!find(layout(Page::More,s),LoginAtStartup).checked);
+    s.startupEnabled=true;assert(find(layout(Page::More,s),LoginAtStartup).checked);
+    s.startupEnabled=false;s.canRemoveStartup=true;s.startupHint=L"系统已关闭 · 移除启动项";
+    assert(!find(layout(Page::More,s),LoginAtStartup).checked);
+    assert(find(layout(Page::More,s),RemoveStartup).label==s.startupHint);
+    s.startupAvailable=false;
+    for(const auto& item:layout(Page::More,s).items) assert(item.id!=LoginAtStartup && item.id!=RemoveStartup);
     assert(destination(ChooseEffects)==Page::Effects&&destination(More)==Page::More);
     assert(comboCommand(SizeChoice,0)==Small&&comboCommand(SizeChoice,1)==Medium&&comboCommand(SizeChoice,2)==Large);
     assert(comboCommand(TailChoice,0)==TailSmall&&comboCommand(TailChoice,1)==TailOriginal);
+    assert(comboCount(AccessoryChoice)==3&&comboCommand(AccessoryChoice,0)==AccessoryNone);
+    assert(comboCommand(AccessoryChoice,1)==AccessoryScarf&&comboCommand(AccessoryChoice,2)==AccessoryCollar);
+    for(int value:{0,1,2}){s.accessory=value;assert(find(layout(Page::Appearance,s),AccessoryChoice).selection==value);assert(std::wstring(comboLabel(AccessoryChoice,value)).size()>0);}
+    s.accessory=999;assert(find(layout(Page::Appearance,s),AccessoryChoice).selection==0);
     s.asleep=true;s.visible=false;s.always=true;s.size=2;s.tail=100;
     assert(find(layout(Page::Home,s),Nap).label==L"醒醒");assert(find(layout(Page::Home,s),Hide).label==L"显示小狗");
     assert(find(layout(Page::Appearance,s),SizeChoice).selection==2&&find(layout(Page::Appearance,s),TailChoice).selection==1);

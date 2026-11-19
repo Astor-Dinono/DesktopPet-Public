@@ -26,8 +26,10 @@ final class MotionTests: XCTestCase {
         XCTAssertNil(motion.sleepStarted)
         motion.endDrag(now: 101)
         XCTAssertNotEqual(motion.pose(now: 101.065).squash, 0)
+        let beforeDrag = motion.pose(now: 101.1).squash
         motion.beginDrag(now: 101.1)
-        XCTAssertEqual(motion.pose(now: 101.1).squash, 0)
+        XCTAssertEqual(motion.pose(now: 101.1).squash, beforeDrag, accuracy: 1e-12)
+        XCTAssertEqual(motion.pose(now: 101.1 + DuangMotion.duration).squash, 0)
     }
 
     func testSpringStartsAndEndsAtRestAndDecays() {

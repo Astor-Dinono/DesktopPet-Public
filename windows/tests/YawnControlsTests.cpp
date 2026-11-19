@@ -81,6 +81,22 @@ int main(){
         RECT work{};assert(SystemParametersInfoW(SPI_GETWORKAREA,0,&work,0));
         app.center={double(work.left+work.right)/2,double(work.top+work.bottom)/2};
         app.dpi=1;ShowWindow(window,SW_SHOWNOACTIVATE);
+        assert(!app.fast(5.1)&&app.fast(5.3)&&!app.fast(5.6));
+        app.timer=CreateWaitableTimerW(nullptr,FALSE,nullptr);assert(app.timer);
+        app.frameSchedule.next=now()+1;app.schedule();assert(app.frameSchedule.armed);
+        app.tick();assert(app.frameSchedule.last==-100&&!app.surface.bits);
+        CancelWaitableTimer(app.timer);app.frameSchedule={};
+
+        // Exercise App::setNap itself, including rapid repeated reversals.
+        app.petExpression.touch(0);const double pleased=app.petExpression.value(.3);
+        app.setNap(true,.3);expectNear(app.petExpression.value(.3),pleased);
+        app.setNap(false,1.2);const auto reentryFading=*app.yawn.pose(1.22);
+        const double decoration=app.yawn.sleepDecorationAmount(1.22);
+        app.setNap(true,1.22);assert(app.yawn.pose(1.22));
+        expectNear(app.yawn.pose(1.22)->time,reentryFading.time);expectNear(app.yawn.pose(1.22)->weight,reentryFading.weight);
+        expectNear(app.yawn.sleepDecorationAmount(1.22),decoration);
+        expectNear(app.yawn.sleepDecorationAmount(1.93),1);
+        app.rest={};app.yawn.clear();app.petExpression.clear();
 
         // Repeated sleep requests preserve the first timeline. Draw every
         // transition stage with native GDI+ and verify transformed hit geometry.
@@ -97,6 +113,18 @@ int main(){
             }
         }
         app.dpi=1;app.angle=0;
+        // None is pixel-identical on return, and either ornament changes only
+        // ink inside the existing body mask throughout the yawn and sleep.
+        assert(app.settings.accessory==dog::Accessory::None);
+        for(double age:{.08,1.2,3.4,4.18,5.2}){
+            assert(app.draw(10+age));const auto none=pixels(app);
+            for(auto accessory:{dog::Accessory::Scarf,dog::Accessory::Collar}){
+                app.settings.accessory=accessory;assert(app.draw(10+age));const auto decorated=pixels(app);
+                assert(decorated!=none);
+                for(std::size_t i=3;i<none.size();i+=4)assert(decorated[i]==none[i]);
+            }
+            app.settings.accessory=dog::Accessory::None;assert(app.draw(10+age));assert(pixels(app)==none);
+        }
         // The actual app renderer must fill one dark eye throughout waking;
         // a faded overlay on the white head fails these interior pixel checks.
         opaqueWakeEyes(app);
@@ -107,7 +135,7 @@ int main(){
         // Real hover routing changes only cheeks while sleeping, including
         // while the clip is still active. It never postpones automatic sleep.
         const double epoch=now()-1.2;
-        app.setNap(false,epoch);app.setNap(true,epoch);app.lastActivity=epoch-30;
+        app.rest={};app.yawn.clear();app.setNap(true,epoch);app.lastActivity=epoch-30;
         assert(app.draw(epoch+1.2));
         const auto a=screenPoint(app,{250,150}),b=screenPoint(app,{350,150});
         assert(app.hitsPet(a)&&app.hitsPet(b));
@@ -143,12 +171,20 @@ int main(){
 
         // Hide and suspension discard an unfinished clip without trapping
         // its suppressed bubble/letters at zero after resuming.
-        app.setNap(true,now()-1);app.show(false);assert(!app.yawn.pose(now()));
+        app.rest={};app.yawn.clear();app.setNap(true,now()-.2);app.show(false);assert(!app.yawn.pose(now()));
+        expectNear(app.rest.pose(now()).closed,1);expectNear(app.rest.pose(now()).letters,1);
         expectNear(app.yawn.sleepDecorationAmount(now()),1);app.show(true);assert(app.rest.sleeping);
-        app.setNap(false);app.setNap(true,now()-1);app.suspended=true;app.pauseChanged();
-        assert(!app.yawn.pose(now()));expectNear(app.yawn.sleepDecorationAmount(now()),1);
-        app.suspended=false;app.pauseChanged();assert(app.rest.sleeping);unchangedCounts(app);
+        for(bool* paused:{&app.suspended,&app.locked,&app.displayOff}){
+            // Reset only fixture motion; no system power/lock is requested.
+            app.rest={};app.yawn.clear();app.setNap(true,now()-.2);
+            app.frameSchedule.next=now()+60;app.schedule();*paused=true;app.pauseChanged();
+            assert(!app.running()&&!app.yawn.pose(now())&&!app.frameSchedule.armed);
+            assert(WaitForSingleObject(app.timer,0)==WAIT_TIMEOUT);
+            expectNear(app.yawn.sleepDecorationAmount(now()),1);expectNear(app.rest.pose(now()).closed,1);
+            *paused=false;app.pauseChanged();assert(app.running()&&app.rest.sleeping);unchangedCounts(app);
+        }
         DestroyWindow(window);
+        CloseHandle(app.timer);app.timer=nullptr;
         assert(DeleteFileW(app.settings.file.c_str()));DeleteFileW((app.settings.file+L".tmp").c_str());assert(RemoveDirectoryW(name));
     }
     GdiplusShutdown(token);
